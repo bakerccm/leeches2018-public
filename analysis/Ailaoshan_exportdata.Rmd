@@ -1,0 +1,169 @@
+---
+title: "Ailaoshan_exportdata.Rmd"
+author: "Chris Baker"
+email: "bakerccm@gmail.com"
+date: "25/10/2019"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+library("tidyverse")
+library("writexl")
+```
+
+```{r clear old variables, include=FALSE}
+rm(list=ls())
+```
+
+```{r read in data, include=FALSE}
+# generated with Ailaoshan_OTU_table.Rmd
+# -- includes OTU table data so that observed occupancy can be calculated
+    load(file="../Ailaoshan_OTU_table.Rdata")
+
+# IUCN data previously generated with Ailaoshan_IUCNdata.Rmd
+# -- loads taxa and taxa.iucn
+    load(file="Ailaoshan_IUCNdata.Rdata")
+
+# occupancy model results after post-processing with Ailaoshan_occupancy_MCMC_postprocess.Rmd
+# -- should have in it: leeech, z.output, psi.output, Nsite.output, lpsi0.output, lp0.output, occ.output
+    load(file="Ailaoshan_occupancy_postprocess_cluster.Rdata")
+```
+
+```{r add occupancy model estimates to original dataframes}
+
+taxa.iucn.estimates <- taxa.iucn %>% 
+    # add occupancy model estimates
+        left_join(OTU.estimates, by = c("dataset", "OTU")) %>%
+    # add rank by occupancy estimate within each dataset
+        group_by(dataset) %>%
+        mutate(`estimated occupancy rank` = as.integer(rank(desc(prob_lpsi0_mean)))) %>%
+        ungroup() %>%
+        select (dataset, `estimated occupancy rank`, everything()) %>%
+    # round estimates to 3 decimal places
+        mutate(`prob_lpsi0_mean` = format(round(`prob_lpsi0_mean`,3), nsmall = 3),
+            `prob_lpsi0_2.5%` = format(round(`prob_lpsi0_2.5%`,3), nsmall = 3),
+            `prob_lpsi0_97.5%` = format(round(`prob_lpsi0_97.5%`,3), nsmall = 3)) %>%
+        mutate(`prob_lp0_mean` = format(round(`prob_lp0_mean`,3), nsmall = 3),
+            `prob_lp0_2.5%` = format(round(`prob_lp0_2.5%`,3), nsmall = 3),
+            `prob_lp0_97.5%` = format(round(`prob_lp0_97.5%`,3), nsmall = 3)) %>%
+    # concatenate 95% credible intervals to a single string
+        mutate(`prob_lpsi_95%CRI` = paste0(`prob_lpsi0_2.5%`, " - ", `prob_lpsi0_97.5%`),
+            `prob_lp_95%CRI` = paste0(`prob_lp0_2.5%`, " - ", `prob_lp0_97.5%`)) %>%
+    # move occupancy model estimates to existing (empty) columns
+        mutate(`estimated occupancy` = `prob_lpsi0_mean`, `estimated detection` = `prob_lp0_mean`) %>%
+        mutate(`estimated occupancy 95%` = `prob_lpsi_95%CRI`, `estimated detection 95%` = `prob_lp_95%CRI`) %>%
+        select(-starts_with("prob_"))
+
+```
+
+```{r export top 10 most abundant OTUs in each dataset for insertion in LaTeX}
+# note that these need some manual editing after export
+# e.g. add common names for species without IUCN common names ('NA'), and splitting into two sub-tables,
+#     add '=' to tied ranks, check capitalisation on common names
+
+taxa.iucn.estimates %>%
+    # only keep some fields
+        select(dataset, `estimated occupancy rank`, consensus.short, genus, species, `IUCN common name`, `Chinese common name`,
+            `IUCN category`, `estimated occupancy`, `estimated occupancy 95%`) %>%
+        mutate(`Occupancy (95\\% BCI)` = paste0(`estimated occupancy`, " (", `estimated occupancy 95%`, ")")) %>%
+    # arrange by estimated occupancy rank and filter to top 10 within each dataset
+        arrange(dataset, `estimated occupancy rank`) %>%
+        filter(`estimated occupancy rank` <= 10) %>%
+        rename(Rank = `estimated occupancy rank`) %>%
+    # make species names italics unless it's only identified to family or higher
+        # find names that don't end with a number and make them italics
+            mutate(consensus.short.italics = is.na(as.numeric(substr(consensus.short, nchar(consensus.short), nchar(consensus.short))))) %>%
+            mutate(consensus.short = ifelse(consensus.short.italics, paste0("\\textit{", consensus.short, "}"), consensus.short)) %>%
+        # find names that do end with a number but have genus name, and make only genus italics
+            mutate(consensus.genus.italics = !consensus.short.italics & !is.na(genus)) %>%
+            mutate(consensus.short = ifelse(consensus.genus.italics, paste0("\\textit{", genus, "} ", species), consensus.short)) %>%
+        rename(`Scientific name` = consensus.short) %>%
+    # join common names
+        rename(`Common name` = `IUCN common name`) %>%
+        mutate(`Common name` = paste0(`Common name`, " (", `Chinese common name`, ")")) %>%
+    # make common name '--' if not identified to species
+        mutate(`Common name` = ifelse(!consensus.short.italics, "--", `Common name`)) %>%
+    # make IUCN category '--' if not available
+        mutate(`IUCN category` = ifelse(is.na(`IUCN category`), "--", `IUCN category`)) %>%
+    select(-dataset, -consensus.short.italics, -consensus.genus.italics, -genus, -species, -`Chinese common name`, -`estimated occupancy`, -`estimated occupancy 95%`) %>%
+    write.table("top10_OTUs_latex.txt", quote = FALSE, sep = " & ", row.names = FALSE, eol = " \\\\\n")
+
+```
+
+```{r get data for subsets of }
+# domesticated animals
+    taxa.iucn.estimates %>% filter(consensus.short %in% c("Bos taurus", "Capra hircus", "Ovis aries"))
+
+# IUCN threatened mammals
+    taxa.iucn.estimates %>% filter(`IUCN category` %in% c("EN", "VU")) %>% filter(class == "Mammals")
+
+```
+
+```{r write taxon data to xlsx file}
+xlsx.export.taxa = list(
+    "LSU taxa" = taxa.iucn.estimates %>% filter(dataset == "LSU") %>% select(-dataset) %>% rename(`OTU name` = consensus.short),
+    "SSU taxa" = taxa.iucn.estimates %>% filter(dataset == "SSU") %>% select(-dataset) %>% rename(`OTU name` = consensus.short)
+)
+
+write_xlsx(xlsx.export.taxa,
+    path = "../manuscript/leeches_supplement_file_S2.xlsx",
+    col_names = TRUE, format_headers = TRUE)
+
+rm(xlsx.export.taxa)
+```
+
+```{r prepare OTU tables and metadata for export}
+
+LSU.OTU.table <- leech %>% filter(dataset == "LSU") %>%
+    select(OTU, Lab_ID, reads) %>%
+    arrange(OTU, Lab_ID) %>%
+    pivot_wider(id_cols = "OTU", names_from = "Lab_ID", values_from = "reads")
+
+SSU.OTU.table <- leech %>% filter(dataset == "SSU") %>%
+    select(OTU, Lab_ID, reads) %>%
+    arrange(OTU, Lab_ID) %>%
+    pivot_wider(id_cols = "OTU", names_from = "Lab_ID", values_from = "reads")
+
+LabID.metadata <- leech %>%
+    select(Lab_ID, Polygon_ID, dataset, leech_qty, fraction.reads.humans) %>%
+    distinct() %>%
+    pivot_wider(id_cols = c(Lab_ID, Polygon_ID, leech_qty), names_from = dataset, values_from = fraction.reads.humans, names_prefix = "fraction.reads.humans.") %>%
+    arrange(Lab_ID) %>%
+    rename(`replicate ID` = Lab_ID, `patrol area ID` = Polygon_ID, `number of leeches` = leech_qty,
+        `fraction of reads from humans (LSU dataset)` = fraction.reads.humans.LSU, `fraction of reads from humans (SSU dataset)` = fraction.reads.humans.SSU)
+        
+PolygonID.metadata <- leech %>%
+    select(Polygon_ID, region_English, Ranger_ID, longitude, latitude, elevation_median, tpi_median,
+        distance_to_road_median, distance_to_stream_median, distance_to_nature_reserve_boundary) %>%
+    distinct() %>%
+    arrange(Polygon_ID) %>%
+    rename(`patrol area ID` = Polygon_ID, `region name` = region_English, `ranger ID` = Ranger_ID,
+        `median elevation (m)` = elevation_median, `median topograpic position index (TPI)` = tpi_median,
+        `median distance to nearest road (m)` = distance_to_road_median, `median distance to nearest stream (m)` = distance_to_stream_median,
+        `centroid distance to reserve boundary (m)` = distance_to_nature_reserve_boundary)
+```
+
+```{r export OTU tables and metadata as xlsx files}
+xlsx.export.OTUtables = list(
+    "LSU OTU table" = LSU.OTU.table,
+    "SSU OTU table" = SSU.OTU.table,
+    "replicate metadata" = LabID.metadata,
+    "patrol area metadata" = PolygonID.metadata
+)
+
+write_xlsx(xlsx.export.OTUtables,
+    path = "../manuscript/leeches_supplement_file_S5.xlsx",
+    col_names = TRUE, format_headers = TRUE)
+
+rm(xlsx.export.OTUtables)
+```
+
+```{r write data to datafile}
+
+save(OTU.estimates, taxa.iucn.estimates, LSU.OTU.table, SSU.OTU.table, LabID.metadata, PolygonID.metadata, file="Ailaoshan_dataexport.Rdata")
+
+```
+
+```{r}
+
+```

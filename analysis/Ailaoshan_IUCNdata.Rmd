@@ -1,0 +1,111 @@
+---
+title: "Ailaoshan_IUCNdata.Rmd"
+author: "Chris Baker"
+email: "bakerccm@gmail.com"
+date: "25/10/2019"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+library("tidyverse")
+library("writexl")
+library("rredlist")
+```
+
+```{r clear old variables, include=FALSE}
+rm(list=ls())
+```
+
+```{r read in data, include=FALSE}
+# generated with Ailaoshan_OTU_table.Rmd
+# already includes environmental data, since that is processed
+# prior to Ailaoshan_OTU_table.Rmd and loaded as part of that
+    load(file="../Ailaoshan_OTU_table.Rdata")
+```
+
+```{r get taxon lists}
+
+taxa <- leech %>%
+    # simplify naming
+        rename(class = consensus.class, order = consensus.order, family = consensus.family, genus = consensus.genus, species = consensus.species, `Chinese common name` = Chinese_common_name) %>%
+    # calculate presence/absence by Polygon_ID
+        group_by(dataset, Polygon_ID, OTU, consensus.short, class, order, family, genus, species, `Chinese common name`) %>%
+        summarise(occupied = ifelse(sum(reads) > 0 , 1, 0)) %>%
+    # calculate fraction of sites occupied
+        group_by(dataset, OTU, consensus.short, class, order, family, genus, species, `Chinese common name`) %>%
+        summarise(`observed occupancy` = sum(occupied) / n()) %>%
+        mutate(`observed occupancy` = `observed occupancy` %>% round(3) %>% format(nsmall=3)) %>%
+        ungroup() %>%
+    # reorder rows so that sp1, sp2 etc go after any named taxa
+        mutate(species = ifelse(grepl("(sp\\d)", species), paste0("zzz ", species), species)) %>%
+        arrange(dataset, class, order, family, genus, species) %>%
+        mutate(species = sub("zzz ", "", species)) %>%
+    # add some empty columns to be filled with occupancy model results later
+        mutate(`estimated occupancy` = NA, `estimated occupancy 95%` = NA, `estimated detection` = NA, `estimated detection 95%` = NA) %>%
+    # prepare names to search for in IUCN database
+        mutate(`IUCN scientific name` = paste(genus, species)) %>%
+        mutate(`IUCN scientific name` = ifelse(grepl("[0-9]$", species), NA, `IUCN scientific name`)) %>%
+        select(dataset, OTU, `IUCN scientific name`, everything())
+
+```
+
+```{r prepare to get IUCN data}
+
+iucn.data <- taxa %>%
+    # consolidate names to search by removing NAs and also any duplicates across datasets
+        select(`IUCN scientific name`) %>% filter(!is.na(`IUCN scientific name`)) %>% distinct() %>%
+    # set up empty fields to populate
+        mutate(
+            `IUCN common name` = NA,
+            `IUCN category` = NA,
+            `IUCN criteria` = NA,
+            `IUCN population trend` = NA,
+            `IUCN assessment date` = NA,
+        ) %>%
+    # save as data.frame, not tibble
+        as.data.frame()
+
+```
+
+```{r get IUCN data}
+
+# rl_use_iucn() # to get API key
+iucn.key = "a3b1e6a5143f90bce1f865a18a037ea66b8dc2772902076b19ba5d0830a7f829"  
+
+# this is slow, mostly due to the requirement that queries take place one at a time with a couple of seconds between.
+
+for (i in 1:nrow(iucn.data)) {
+    curr_sp_data <- rl_search(iucn.data$`IUCN scientific name`[i], key = iucn.key)$result
+    if (!(is_empty(curr_sp_data))) {
+        iucn.data[i, "IUCN category"] <- curr_sp_data$category
+        iucn.data[i, "IUCN population trend"] <- curr_sp_data$population_trend
+        iucn.data[i, "IUCN assessment date"] <- curr_sp_data$assessment_date
+        iucn.data[i, "IUCN criteria"] <- curr_sp_data$criteria
+        iucn.data[i, "IUCN common name"] <- curr_sp_data$main_common_name
+    }
+    rm(curr_sp_data)
+    Sys.sleep(2)
+}
+
+rm(i, iucn.key)
+
+```
+
+```{r merge IUCN data back in with taxon data}
+
+taxa.iucn <- taxa %>%
+    left_join(iucn.data, by = "IUCN scientific name") %>%
+    select(-starts_with("IUCN "), starts_with("IUCN "))
+
+```
+
+```{r save to file, eval = FALSE}
+
+save(taxa, iucn.data, taxa.iucn, file="Ailaoshan_IUCNdata.Rdata")
+
+```
+
+```{r}
+
+```
+

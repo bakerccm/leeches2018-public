@@ -1,0 +1,82 @@
+---
+title: "Ailaoshan_occupancy_analyze_Fig2c_occupancy_detection.Rmd"
+author: "Chris Baker"
+email: "bakerccm@gmail.com"
+date: "02/12/2019"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+library("tidyverse")
+library("ggrepel")
+```
+
+```{r clear old variables, include=FALSE}
+rm(list=ls())
+```
+
+```{r read in data, include=FALSE}
+# generated with Ailaoshan_OTU_table.Rmd
+    load(file="../Ailaoshan_OTU_table.Rdata")
+
+# MCMC output generated with Ailaoshan_occupancy_postprocess_cluster.Rmd
+    load(file="Ailaoshan_occupancy_postprocess_cluster.Rdata")
+```
+
+```{r prepare data for graphing}
+
+# join observed occupancy with model estimates
+    OTU.occupancy.summary <- leech %>%
+        # calculate presence/absence by Polygon_ID
+            group_by(dataset, Polygon_ID, OTU, consensus.short, consensus.class, consensus.order, consensus.family, consensus.genus, consensus.species) %>%
+            summarise(occupied = ifelse(sum(reads) > 0 , 1, 0)) %>%
+        # calculate fraction of sites occupied
+            group_by(dataset, OTU, consensus.short, consensus.class, consensus.order, consensus.family, consensus.genus, consensus.species) %>%
+            summarise(`observed occupancy` = sum(occupied) / n()) %>%
+            ungroup() %>%
+        # attach model estimates for occupancy and detection
+            left_join(OTU.estimates, by = c("dataset", "OTU")) %>%
+        # add rank for observed occupancy, estimated occupancy and estimated detection probability within each dataset
+            group_by(dataset) %>%
+            mutate(`observed occupancy rank` = rank(desc(`observed occupancy`))) %>% # observed occupancy
+            mutate(`prob_lpsi0_mean rank` = rank(desc(prob_lpsi0_mean))) %>% # estimated occupancy probability
+            mutate(`prob_lp0_mean rank` = rank(desc(prob_lp0_mean))) %>% # estimated detection probability
+            ungroup()
+```
+
+```{r draw plots}
+OTU.occupancy.summary.plot <- OTU.occupancy.summary %>%
+    ggplot(aes(x=prob_lpsi0_mean, y=prob_lp0_mean, col=consensus.class, label=consensus.short)) + geom_point(alpha=0.5) +
+    labs(x="occupancy probability", y = "detection probability", col="Class") +
+    facet_wrap("dataset") + xlim(0,1)
+
+# unlabelled
+    OTU.occupancy.summary.plot
+    ggsave("figures/Fig2c_occupancy_detection.pdf", width=7, height=4)
+
+# with text labels
+# use this to work out how to label points on plot above in illustrator
+    OTU.occupancy.summary.plot + geom_text(size = 1, show.legend = FALSE)
+    ggsave("figures/Fig2c_occupancy_detection_labels.pdf", width=7, height=4)
+
+# with error bars
+    OTU.occupancy.summary.plot +
+        geom_errorbar(aes(ymin = `prob_lp0_2.5%`, ymax = `prob_lp0_97.5%`)) +
+        geom_errorbarh(aes(xmin = `prob_lpsi0_2.5%`, xmax = `prob_lpsi0_97.5%`))
+
+rm(OTU.occupancy.summary.plot)
+```
+```{r median species-wise occupancy and detection estimates}
+# occupancy = median.prob_lpsi0_mean
+# detection = median.prob_lp0_mean
+
+OTU.occupancy.summary %>%
+    group_by(dataset) %>%
+    summarize(median.prob_lpsi0_mean = median(prob_lpsi0_mean) %>% round(.,3), median.prob_lp0_mean = median(prob_lp0_mean) %>% round(.,3))
+
+```
+
+```{r}
+
+```
+

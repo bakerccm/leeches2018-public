@@ -1,0 +1,68 @@
+---
+title: "Untitled"
+author: "Chris Baker"
+date: "11/02/2019"
+output: html_document
+---
+# some map figures for Doug's slides
+# but will probably be useful for making figures for ms too
+
+# see e.g.https://datacarpentry.org/r-raster-vector-geospatial/06-vector-open-shapefile-in-r/
+# and https://www.ecologi.st/post/spatial-data-in-r-2-a-practical-example/
+
+# Note. download DEM data from USGS earth explorer:
+# https://earthexplorer.usgs.gov
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+knitr::opts_chunk$set(root.dir="/Users/chris/Documents/work/leeches/leeches2018/gis")
+```
+
+```{r}
+#install.packages("sf")
+library("sf")
+library("gplots")
+library("ggrepel")
+library("readxl")
+library("viridis")
+library("raster")
+#library("rgdal")
+#install.packages("spData")
+library("fasterize")
+library("rasterVis")
+library("rgl")
+library("magick")
+library("tidyverse")
+library("egg")
+```
+
+```{r}
+rm(list=ls())
+```
+
+```{r get data}
+#Ailaoshan raw and modelled data
+    # load(file="../Ailaoshan_OTU_table.Rdata")
+    # load(file="../Ailaoshan_occupancy_slides4doug_summary.Rdata")
+#Ailaoshan processed GIS data
+    load(file="ailaoshan_gis.Rdata")
+#Ailaoshan environmental data : should be the same as in ailaoshan.polygons as loaded in ailaoshan_gis.Rdata
+    # load(file="ailaoshan_gis.Rdata")
+```
+
+```{r get world map}
+library("rnaturalearth")
+library("rnaturalearthdata")
+# library("rnaturalearthhires") # load if you want to use scale = "large" below
+world <- ne_countries(scale = "medium", returnclass = "sf")
+```
+
+```{r}
+ggplot() +
+    geom_sf(data = world, fill="grey", color=NA) +
+    geom_sf(data = ailaoshan.polygons[ailaoshan.polygons$Polygon_ID == 9,], fill="red", color="red") +
+    geom_sf(data = world, fill=NA, color="black") +
+    coord_sf(xlim = c(40, 150), ylim = c(-20, 70), expand = FALSE)
+#ggsave("Ailaoshan_map_continent.png", device = "png", width=4, height=4)
+ggsave("Ailaoshan_map_continent.pdf", device = "pdf", width=4, height=4)
+```

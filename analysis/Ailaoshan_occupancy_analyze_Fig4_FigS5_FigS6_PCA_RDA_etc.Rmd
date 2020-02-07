@@ -1,0 +1,401 @@
+---
+title: "Ailaoshan_occupancy_analyzeFig4_PCA.Rmd"
+author: "Chris Baker"
+email: "bakerccm@gmail.com"
+date: "26/11/2019"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+library("tidyverse")
+library("vegan") # for rda
+```
+
+```{r clear old variables, include=FALSE}
+rm(list=ls())
+```
+
+```{r read in MCMC output and GIS output for drawing maps, include=FALSE}
+# generated with Ailaoshan_OTU_table.Rmd
+# this just gives the object leech, which is loaded as part of Ailaoshan_occupancy_MCMC_prepare.Rdata below anyway
+    load(file="../Ailaoshan_OTU_table.Rdata")
+
+# generated with Ailaoshan_IUCNdata.Rmd
+    load(file="Ailaoshan_IUCNdata.Rdata")
+
+# MCMC output generated with Ailaoshan_occupancy_postprocess_cluster.Rmd
+    load(file="Ailaoshan_occupancy_postprocess_cluster.Rdata")
+
+# Ailaoshan processed GIS data
+    load(file="../gis/ailaoshan_gis.Rdata")
+```
+
+```{r prepare data from model}
+z <- list()
+psi <- list()
+lpsi0 <- list()
+
+# get z from each of the top models (i.e. per-polygon z estimates)
+    z[["LSU"]] <- z.output[["LSU"]]$model23a %>% ungroup() %>%
+        dplyr::select(mean, Polygon_ID, OTU) %>%
+        spread(key = OTU, value = mean) %>%
+        as.data.frame()
+    z[["SSU"]] <- z.output[["SSU"]]$model23a %>% ungroup() %>%
+        dplyr::select(mean, Polygon_ID, OTU) %>%
+        spread(key = OTU, value = mean) %>%
+        as.data.frame()
+
+# get psi from each of the top models (i.e. per-polygon psi estimates)
+    psi[["LSU"]] <- psi.output[["LSU"]]$model23a %>% ungroup() %>%
+        dplyr::select(mean, Polygon_ID, OTU) %>%
+        spread(key = OTU, value = mean) %>%
+        as.data.frame()
+    psi[["SSU"]] <- psi.output[["SSU"]]$model23a %>% ungroup() %>%
+        dplyr::select(mean, Polygon_ID, OTU) %>%
+        spread(key = OTU, value = mean) %>%
+        as.data.frame()
+
+# get lpsi0 from each of the top models (per species)
+    lpsi0[["LSU"]] <- lpsi0.output[["LSU"]]$model23a %>% ungroup() %>%
+        dplyr::select(mean, OTU) %>%
+        rename(lpsi0 = mean) %>%
+        as.data.frame()
+    lpsi0[["SSU"]] <- lpsi0.output[["SSU"]]$model23a %>% ungroup() %>%
+        dplyr::select(mean, OTU) %>%
+        rename(lpsi0 = mean) %>%
+        as.data.frame()
+
+for (i in c("LSU", "SSU")) {
+    # species as rows, sites as columns
+    # z (i.e. per-polygon z estimates)
+        rownames(z[[i]]) <- z[[i]]$Polygon_ID
+        z[[i]] <- z[[i]] %>%
+            select(-Polygon_ID) %>%
+            as.matrix() %>% t() %>% as.data.frame()
+        z[[i]] <- z[[i]] %>%
+            mutate(OTU = rownames(z[[i]]))
+        # z[[i]] <- z[[i]] %>% left_join(leeech[[i]]$taxa %>% dplyr::select(-Taxonomy), by="consensus.short")
+        # z[[i]] <- z[[i]] %>% dplyr::select(consensus.short, Class, Order, Family, Genus, Species, everything())
+        rownames(z[[i]]) <- z[[i]]$OTU
+    # psi (i.e. per-polygon psi estimates)
+        rownames(psi[[i]]) <- psi[[i]]$Polygon_ID
+        psi[[i]] <- psi[[i]] %>%
+            select(-Polygon_ID) %>%
+            as.matrix() %>% t() %>% as.data.frame()
+        psi[[i]] <- psi[[i]] %>%
+            mutate(OTU = rownames(psi[[i]]))
+        # psi[[i]] <- psi[[i]] %>% left_join(leeech[[i]]$taxa %>% dplyr::select(-Taxonomy), by="consensus.short")
+        # psi[[i]] <- psi[[i]] %>% dplyr::select(consensus.short, Class, Order, Family, Genus, Species, everything())
+        rownames(psi[[i]]) <- psi[[i]]$OTU
+}
+
+rm(i)
+```
+
+```{r get environmental data for sites}
+PolygonID.data <- list()
+sites.data <- list()
+
+for (i in c("LSU","SSU")) {
+    PolygonID.data[[i]] <- bind_rows(leech, leech.supplement) %>%
+        select(Polygon_ID, elevation_median, tpi_median, distance_to_road_median, distance_to_stream_median,
+            distance_to_nature_reserve_boundary) %>%
+        distinct()
+    sites.data[[i]] <- z[[i]] %>% select(-OTU) %>%
+        t() %>% as.data.frame() %>% mutate(Polygon_ID = rownames(.)) %>% as_tibble() %>%
+        left_join(PolygonID.data[[i]], by="Polygon_ID") %>%
+        dplyr::select(Polygon_ID, everything())  %>% filter(complete.cases(.))
+    sites.data[[i]] <- sites.data[[i]] %>%
+        rename(elev = elevation_median, TPI = tpi_median, road = distance_to_road_median, stream = distance_to_stream_median,
+            reserve = distance_to_nature_reserve_boundary)
+}
+rm(PolygonID.data)
+```
+
+```{r ordinations}
+# calculate PCA and RDA
+
+    sites.pca <- list()
+    sites.rda <- list()
+
+    for (i in c("LSU","SSU")) {
+
+        sites.pca[[i]] <- prcomp(sites.data[[i]] %>% dplyr::select(-Polygon_ID, -elev, -TPI, -road, -stream, -reserve))
+
+        sites.rda[[i]] <- rda(sites.data[[i]] %>% select(-Polygon_ID, -elev, -TPI, -road, -stream, -reserve) ~ elev + TPI + road + stream + reserve,
+            data = sites.data[[i]])
+        
+    }
+
+    #summary(sites.rda[["LSU"]])
+    #summary(sites.rda[["SSU"]])
+
+# extract scores
+
+    sites.pc1.scores <- list()
+    sites.rda.scores <- list()
+    species.rda.scores <- list()
+    variable.rda.scores <- list()
+
+    leech.OTU.info <- bind_rows(leech, leech.supplement) %>%
+        select(dataset, OTU, starts_with("consensus"), Chinese_common_name, domestic, AdultBodyMass_g, AdultBodyMass_g_source) %>%
+        distinct() %>%
+        left_join(taxa.iucn %>% select(OTU, `IUCN category`), by = "OTU")
+
+    for (i in c("LSU","SSU")) {
+        sites.pc1.scores[[i]] <- sites.pca[[i]]$x[,"PC1"]
+        sites.rda.scores[[i]] <- scores(sites.rda[[i]])$sites %>% as.data.frame() %>% mutate(PC1 = sites.pc1.scores[[i]]) %>%
+            mutate(Polygon_ID = sites.data[[i]]$Polygon_ID)
+        species.rda.scores[[i]] <- scores(sites.rda[[i]])$species %>% as.data.frame() %>%
+            mutate(OTU = rownames(scores(sites.rda[[i]])$species)) %>%
+            left_join(lpsi0[[i]], by="OTU") %>%
+            left_join(leech.OTU.info, by="OTU") %>%
+            select(OTU, consensus.short, domestic, AdultBodyMass_g, AdultBodyMass_g_source, everything())
+        variable.rda.scores[[i]] <- sites.rda[[i]]$CCA$biplot[,1:2] %>% as.data.frame() %>%
+            mutate(variable = rownames(sites.rda[[i]]$CCA$biplot))
+    }
+    
+    rm(leech.OTU.info)
+
+# flip colors and values for some axes where desired since signs of PC and RCA axes are arbitrary
+
+    sites.rda.scores[["SSU"]] <- sites.rda.scores[["SSU"]] %>% mutate(RDA1 = -RDA1, RDA2 = -RDA2, PC1 = -PC1)
+    species.rda.scores[["SSU"]] <- species.rda.scores[["SSU"]] %>% mutate(RDA1 = -RDA1, RDA2 = -RDA2)
+    variable.rda.scores[["SSU"]] <- variable.rda.scores[["SSU"]] %>% mutate(RDA1 = -RDA1, RDA2 = -RDA2)
+    
+    sites.rda.scores[["LSU"]] <- sites.rda.scores[["LSU"]] %>% mutate(RDA1 = -RDA1)
+    species.rda.scores[["LSU"]] <- species.rda.scores[["LSU"]] %>% mutate(RDA1 = -RDA1)
+    variable.rda.scores[["LSU"]] <- variable.rda.scores[["LSU"]] %>% mutate(RDA1 = -RDA1)
+
+```
+
+```{r Fig XX/XX : PCAs with sites coloured according to PC1}
+
+# note these only plot sites with actual measured environmental data i.e. it skips the ranger inferred polygons or the polygons with values imputed in the model
+
+my.filenames <- list(LSU = "~/Desktop/LSU_pca.pdf", SSU = "~/Desktop/SSU_pca.pdf")
+
+summary(sites.pca$LSU)
+summary(sites.pca$SSU)
+
+for (i in c("LSU","SSU")) {
+        sites.pca[[i]]$x %>% as.data.frame() %>% ggplot() +
+            xlim(-1.5,0.7) +
+            geom_point(aes(x= PC1, y= PC2, col=PC1)) +
+            coord_fixed() + theme (aspect.ratio = 1) +
+            labs(color=paste0(i,"\nSites PC1"))
+        ggsave(my.filenames[[i]], width=5, height=5)
+}
+
+rm(my.filenames)
+
+```
+
+```{r Fig 4a/4b : RDAs with sites coloured according to PC1}
+
+my.filenames <- list(LSU = "figures/Fig4a_LSU_rda.pdf", SSU = "figures/Fig4b_SSU_rda.pdf")
+
+for (i in c("LSU","SSU")) {
+        sites.rda.scores[[i]] %>% ggplot() +
+            xlim(-0.8, 1.3) + ylim(-1.1, 1.0) + 
+            geom_point(aes(x= RDA1, y= RDA2, col=PC1)) +
+            geom_segment(aes(x=0, xend=RDA1, y=0, yend=RDA2), data = variable.rda.scores[[i]], color= "red", arrow=arrow(length=unit(0.01,"npc"))) +
+            geom_text(data = variable.rda.scores[[i]], color= "red", size=3,
+                aes(x=RDA1, y=RDA2,label=variable, hjust=0.5*(1-sign(RDA1)),vjust=0.5*(1-sign(RDA2)))) +
+            coord_fixed(ratio = 1) + #scale_color_continuous(trans="reverse", guide = guide_colourbar(reverse = TRUE)) +
+            labs(color=paste0(i,"\nSites PC1"))
+        ggsave(my.filenames[[i]], width=5, height=5)
+}
+
+rm(my.filenames)
+```
+
+```{r tests of PCA and RDA axes, eval = FALSE}
+summary(sites.pca$LSU)
+
+summary(sites.pca$SSU)
+
+anova.cca(sites.rda$LSU, by="axis")
+#anova.cca(sites.rda$LSU, by="terms")
+
+anova.cca(sites.rda$SSU, by="axis")
+#anova.cca(sites.rda$SSU, by="terms")
+
+sites.rda$LSU %>% summary()
+# gives the same results for % of variance explained
+# sites.rda$LSU$CCA$eig /  (sum(sites.rda$LSU$CCA$eig) + sum(sites.rda$LSU$CA$eig))
+
+sites.rda$SSU %>% summary()
+# gives the same results for % of variance explained
+# sites.rda$SSU$CCA$eig /  (sum(sites.rda$SSU$CCA$eig) + sum(sites.rda$SSU$CA$eig))
+```
+
+```{r Fig 4c/4d : maps showing PC1 scores}
+
+ailaoshan.polygons.PC1 <- ailaoshan.polygons %>% mutate(Polygon_ID = as.character(Polygon_ID)) %>%
+    left_join(sites.rda.scores[["LSU"]] %>% dplyr::select(Polygon_ID, PC1) %>% rename(LSU_PC1 = PC1), by = "Polygon_ID") %>%
+    left_join(sites.rda.scores[["SSU"]] %>% dplyr::select(Polygon_ID, PC1) %>% rename(SSU_PC1 = PC1), by = "Polygon_ID")
+
+ailaoshan.polygons.PC1 %>%
+    ggplot() + geom_sf(aes(fill=LSU_PC1), size = 0.1, color = 'black') +
+        theme(legend.position=c(0,0), legend.justification=c(0,0), legend.background = element_rect(fill=NA)) +
+        coord_sf() + labs(fill = "LSU\nSites PC1")
+ggsave("figures/Fig4c_LSU_mapPC1.pdf", width=4, height=4)
+
+ailaoshan.polygons.PC1 %>%
+    ggplot() + geom_sf(aes(fill=SSU_PC1), size = 0.1, color = "black") +
+        theme(legend.position=c(0,0), legend.justification=c(0,0), legend.background = element_rect(fill=NA)) +
+        coord_sf() + labs(fill = "SSU\nSites PC1")
+ggsave("figures/Fig4d_SSU_mapPC1.pdf", width=4, height=4)
+```
+
+```{r RDAs/species biplots - base plots}
+rda.plots <- list()
+for (i in c("LSU","SSU")) {
+    rda.plots[[i]] <- sites.rda.scores[[i]] %>% ggplot() +
+        geom_point(aes(x= RDA1, y= RDA2, color=PC1), alpha = 0.4) +
+        xlim(-0.8, 1.3) + ylim(-1.1, 1.0) + 
+        coord_fixed(ratio =1) +
+        labs(color = paste0(i, "\nSites PC1"))
+}
+```
+
+```{r RDAs/species biplots : Fig 4e/4f : mammals 10kg plus}
+my.filenames <- list(LSU = "figures/Fig4e_LSU_species_mammals10kgplus.pdf", SSU = "figures/Fig4f_SSU_species_mammals10kgplus.pdf")
+
+species.rda.scores.selected <- list()
+
+species.rda.scores[["LSU"]] %>% filter(AdultBodyMass_g/1000 > 10)
+species.rda.scores[["SSU"]] %>% filter(AdultBodyMass_g/1000 > 10)
+
+for (i in c("LSU","SSU")) {
+    # only retain mammals with adult body size over 10 kg
+    species.rda.scores.selected[[i]] <- species.rda.scores[[i]] %>%
+        filter(consensus.class == "Mammals") %>%
+        filter(AdultBodyMass_g/1000 > 10)
+    rda.plots[[i]] +
+        geom_segment(data = species.rda.scores.selected[[i]], aes(x=0, xend=RDA1, y=0, yend=RDA2), arrow=arrow(length=unit(0.01,"npc")), color = "red") +
+        geom_text(data = species.rda.scores.selected[[i]], color = "red", size=2,
+            aes(x = RDA1, y = RDA2, label = consensus.short, hjust = 0.5*(1-sign(RDA1)), vjust = 0.5*(1-sign(RDA2))))
+    ggsave(my.filenames[[i]], width=5, height=5)
+}
+
+rm(my.filenames, species.rda.scores.selected)
+```
+
+```{r RDAs/species biplots : alternative Fig 4e/4f : top and bottom 5 species by RDA rank} 
+my.filenames <- list(LSU = "figures/Fig4e_LSU_species_top10.pdf", SSU = "figures/Fig4f_SSU_species_top10.pdf")
+
+species.rda.scores.selected <- list()
+
+for (i in c("LSU","SSU")) {
+    # only retain top/bottom 5 RDA scores
+    species.rda.scores.selected[[i]] <- species.rda.scores[[i]] %>%
+        filter(consensus.class == "Mammals") %>%
+            filter(rank(-abs(RDA1)) <= 10)
+    rda.plots[[i]] +
+        geom_segment(aes(x=0, xend=RDA1, y=0, yend=RDA2), data = species.rda.scores.selected[[i]], arrow=arrow(length=unit(0.01,"npc")), col = "red") +
+        geom_text(data = species.rda.scores.selected[[i]], color = "red", size=2,
+            aes(x = RDA1, y = RDA2, label = consensus.short, hjust = 0.5*(1-sign(RDA1)), vjust = 0.5*(1-sign(RDA2))))
+    
+    ggsave(my.filenames[[i]], width=5, height=5)
+}
+
+rm(my.filenames, species.rda.scores.selected)
+```
+
+```{r RDAs/species biplots : alternate Figure S5}
+#small mammals
+
+    my.filenames <- list(LSU = "figures/FigS5_alternate/FigS5a_LSU_species_mammalsbelow10kg.pdf", SSU = "figures/FigS5_alternate/FigS5b_SSU_species_mammalsbelow10kg.pdf")
+
+    species.rda.scores.selected <- list()
+
+    species.rda.scores[["LSU"]] %>% filter(AdultBodyMass_g/1000 < 10)
+    species.rda.scores[["SSU"]] %>% filter(AdultBodyMass_g/1000 < 10)
+
+    
+    # only retain mammals with adult body size less than 10 kg and 5 largest responses on RDA1
+    for (i in c("LSU","SSU")) {
+        species.rda.scores.selected[[i]] <- species.rda.scores[[i]] %>%
+            filter(consensus.class == "Mammals") %>%
+            filter(AdultBodyMass_g/1000 < 10) %>%
+            filter(rank(-abs(RDA1)) <= 5)
+        rda.plots[[i]] +
+            geom_segment(data = species.rda.scores.selected[[i]], aes(x=0, xend=RDA1, y=0, yend=RDA2), arrow=arrow(length=unit(0.01,"npc")), color = "red") +
+            geom_text(data = species.rda.scores.selected[[i]], color = "red", size=2,
+                aes(x = RDA1, y = RDA2, label = consensus.short, hjust = 0.5*(1-sign(RDA1)), vjust = 0.5*(1-sign(RDA2))))
+        ggsave(my.filenames[[i]], width=5, height=5)
+    }
+
+# amphibians
+
+    my.filenames <- list(LSU = "figures/FigS5_alternate/FigS5c_LSU_species_amphibians.pdf", SSU = "figures/FigS5_alternate/FigS5d_SSU_species_amphibians.pdf")
+
+    species.rda.scores.selected <- list()
+
+    for (i in c("LSU","SSU")) {
+        # only retain amphibians and 5 largest responses on RDA1
+        species.rda.scores.selected[[i]] <- species.rda.scores[[i]] %>%
+            filter(consensus.class == "Amphibians") %>%
+            filter(rank(-abs(RDA1)) <= 5)
+        rda.plots[[i]] +
+            geom_segment(data = species.rda.scores.selected[[i]], aes(x=0, xend=RDA1, y=0, yend=RDA2), arrow=arrow(length=unit(0.01,"npc")), color = "red") +
+            geom_text(data = species.rda.scores.selected[[i]], color = "red", size=2,
+                aes(x = RDA1, y = RDA2, label = consensus.short, hjust = 0.5*(1-sign(RDA1)), vjust = 0.5*(1-sign(RDA2))))
+        ggsave(my.filenames[[i]], width=5, height=5)
+    }
+
+# birds
+
+    my.filenames <- list(LSU = "figures/FigS5_alternate/FigS5e_LSU_species_birds.pdf", SSU = "figures/FigS5_alternate/FigS5f_SSU_species_birds.pdf")
+
+    species.rda.scores.selected <- list()
+
+    for (i in c("LSU","SSU")) {
+        # only retain birds with top/bottom 5 RDA scores
+        species.rda.scores.selected[[i]] <- species.rda.scores[[i]] %>%
+            filter(consensus.class == "Birds") %>%
+            filter(rank(-abs(RDA1)) <= 5)
+        rda.plots[[i]] +
+            geom_segment(data = species.rda.scores.selected[[i]], aes(x=0, xend=RDA1, y=0, yend=RDA2), arrow=arrow(length=unit(0.01,"npc")), color = "red") +
+            geom_text(data = species.rda.scores.selected[[i]], color = "red", size=2,
+                aes(x = RDA1, y = RDA2, label = consensus.short, hjust = 0.5*(1-sign(RDA1)), vjust = 0.5*(1-sign(RDA2))))
+        ggsave(my.filenames[[i]], width=5, height=5)
+    }
+
+rm(my.filenames, species.rda.scores.selected)
+
+```
+
+```{r}
+species.rda.scores$LSU %>%
+    # add dummy reptile rows to ensure reptiles facet is wide enough
+    bind_rows(tibble(consensus.short = paste0("dummy", 1:4), consensus.class = rep("Reptiles",4),
+        RDA1 = c(rep(0.3, 2), rep(0.1, 2)))) %>%
+    ggplot(aes(x = reorder(consensus.short, -RDA1), y = RDA1, fill = consensus.class)) +
+        geom_bar(stat="identity") +
+        facet_grid(~consensus.class, scales = "free_x", space = "free") +
+        theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.45)) +
+        labs(x = "Species name" , y = "RDA1 score", fill = "Class") + 
+        # geom_text(data = , aes(label = `IUCN category`, vjust = 0.5 * sign(-RDA1)), hjust = 0.5, size = 2, colour = "black", )
+        geom_text(data = , aes(label = `IUCN category`, vjust = "outward"), hjust = 0.5, size = 2, colour = "black")
+ggsave("figures/FigS5_LSU_RDA1_scores.pdf", width = 12, height = 6)
+
+species.rda.scores$SSU %>%
+    # add dummy reptile rows to ensure reptiles facet is wide enough
+    bind_rows(tibble(consensus.short = paste0("dummy", 1:2), consensus.class = rep("Reptiles",2),
+        RDA1 = c(rep(0.1, 1), rep(-0.1, 1)))) %>%
+    ggplot(aes(x = reorder(consensus.short, -RDA1), y = RDA1, fill = consensus.class)) +
+        geom_bar(stat="identity") +
+        facet_grid(~consensus.class, scales = "free_x", space = "free") +
+        theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.45)) +
+        labs(x = "Species name" , y = "RDA1 score", fill = "Class") + 
+        geom_text(data = , aes(label = `IUCN category`, vjust = "outward"), hjust = 0.5, size = 2, colour = "black")
+ggsave("figures/FigS6_SSU_RDA1_scores.pdf", width = 12, height = 6)
+```
+
+```{r}
+
+```
+

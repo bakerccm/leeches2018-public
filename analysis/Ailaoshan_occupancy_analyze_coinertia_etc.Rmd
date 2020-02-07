@@ -1,0 +1,105 @@
+---
+title: "Ailaoshan_occupancy_analyze_coinertia_etc.Rmd"
+author: "Chris Baker"
+email: "bakerccm@gmail.com"
+date: "11/12/2019"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+library("tidyverse")
+library("ade4") # for co-inertia
+```
+
+```{r clear old variables, include=FALSE}
+rm(list=ls())
+```
+
+```{r read in MCMC output and GIS output for drawing maps, include=FALSE}
+# generated with Ailaoshan_OTU_table.Rmd
+# this just gives the object leech, which is loaded as part of Ailaoshan_occupancy_MCMC_prepare.Rdata below anyway
+    load(file="../Ailaoshan_OTU_table.Rdata")
+
+# MCMC output generated with Ailaoshan_occupancy_postprocess_cluster.Rmd
+    load(file="Ailaoshan_occupancy_postprocess_cluster.Rdata")
+```
+
+```{r prepare data from model}
+z <- list()
+
+# get z from each of the top models (i.e. per-polygon z estimates)
+    z[["LSU"]] <- z.output[["LSU"]]$model23a %>% ungroup() %>%
+        dplyr::select(mean, Polygon_ID, OTU) %>%
+        spread(key = OTU, value = mean) %>%
+        as.data.frame()
+    z[["SSU"]] <- z.output[["SSU"]]$model23a %>% ungroup() %>%
+        dplyr::select(mean, Polygon_ID, OTU) %>%
+        spread(key = OTU, value = mean) %>%
+        as.data.frame()
+
+for (i in c("LSU", "SSU")) {
+    # species as rows, sites as columns
+    # z (i.e. per-polygon z estimates)
+        rownames(z[[i]]) <- z[[i]]$Polygon_ID
+        z[[i]] <- z[[i]] %>%
+            select(-Polygon_ID) %>%
+            as.matrix() %>% t() %>% as.data.frame()
+        z[[i]] <- z[[i]] %>%
+            mutate(OTU = rownames(z[[i]]))
+        # z[[i]] <- z[[i]] %>% left_join(leeech[[i]]$taxa %>% dplyr::select(-Taxonomy), by="consensus.short")
+        # z[[i]] <- z[[i]] %>% dplyr::select(consensus.short, Class, Order, Family, Genus, Species, everything())
+        rownames(z[[i]]) <- z[[i]]$OTU
+}
+
+rm(i)
+```
+
+```{r get environmental data for sites}
+PolygonID.data <- list()
+sites.data <- list()
+
+for (i in c("LSU","SSU")) {
+    PolygonID.data[[i]] <- bind_rows(leech, leech.supplement) %>%
+        select(Polygon_ID, elevation_median, tpi_median, distance_to_road_median, distance_to_stream_median,
+            distance_to_nature_reserve_boundary) %>%
+        distinct()
+    sites.data[[i]] <- z[[i]] %>% select(-OTU) %>%
+        t() %>% as.data.frame() %>% mutate(Polygon_ID = rownames(.)) %>% as_tibble() %>%
+        left_join(PolygonID.data[[i]], by="Polygon_ID") %>%
+        dplyr::select(Polygon_ID, everything())  %>% filter(complete.cases(.))
+    sites.data[[i]] <- sites.data[[i]] %>%
+        rename(elev = elevation_median, TPI = tpi_median, road = distance_to_road_median, stream = distance_to_stream_median,
+            reserve = distance_to_nature_reserve_boundary)
+}
+rm(PolygonID.data)
+```
+
+```{r co-inertia analysis between sites}
+# N.B. this code block requires ade4 package
+
+# prepare PCAs as input for co-inertia analysis
+# (N.B. coinertia function below retrieves the standardized data from the dudi.pca objects. The PCA results themselves are not used.)
+    sites.dudi.pca <- list()
+    for (i in c("LSU", "SSU")) {
+        sites.dudi.pca[[i]] <- dudi.pca(sites.data[[i]] %>% dplyr::select(-Polygon_ID, -elev, -TPI, -road, -stream, -reserve),
+            scale = FALSE, scan = FALSE)
+    }
+# co-inertia analysis
+    coin <- coinertia(sites.dudi.pca$LSU, sites.dudi.pca$SSU, scan=FALSE, nf=3)
+
+# plot the results
+    pdf("~/Desktop/coin.pdf", width=12, height = 12)
+    plot(coin)
+    dev.off()
+
+# test coinertia
+    RV.rtest(df1 = sites.data$LSU %>% dplyr::select(-Polygon_ID, -elev, -TPI, -road, -stream, -reserve),
+        df2 = sites.data$SSU %>% dplyr::select(-Polygon_ID, -elev, -TPI, -road, -stream, -reserve),
+        nrepet = 999
+    )
+```    
+
+```{r}
+
+```
+

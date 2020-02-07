@@ -1,0 +1,330 @@
+---
+title: "Ailaoshan_occupancy_analyze_FigS4_richness.Rmd"
+author: "Chris Baker"
+email: "bakerccm@gmail.com"
+date: "02/12/2019"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+library("tidyverse")
+```
+
+```{r clear old variables, include=FALSE}
+rm(list=ls())
+```
+
+```{r read in MCMC output and GIS output for drawing maps, include=FALSE}
+# generated with Ailaoshan_OTU_table.Rmd
+    load(file="../Ailaoshan_OTU_table.Rdata")
+
+# generated with Ailaoshan_occupancy_postprocess_cluster.R
+    load(file="Ailaoshan_occupancy_postprocess_cluster.Rdata")
+```
+
+```{r calculate observed richness per Lab_ID}
+LabID.obsv.richness.allOTUs <- leech %>% select(dataset, Lab_ID, consensus.short, reads) %>%
+    # calculate observed richness per Lab_ID
+        mutate(occupied = ifelse(reads > 0, 1, 0)) %>% 
+        group_by(dataset, Lab_ID) %>%
+        summarize(observed.richness = as.integer(sum(occupied, na.rm = TRUE))) %>%
+    # convert to wide format
+        ungroup() %>%
+        pivot_wider(id_cols = Lab_ID, names_from = dataset, values_from = observed.richness, names_prefix = "observed.richness.") %>%
+        filter(complete.cases(.)) %>%
+    # add back leech_qty (shouldn't matter whether we use LSU or SSU as they are the same samples)
+        left_join(leech %>% select(Lab_ID, leech_qty) %>% distinct(), by = "Lab_ID")
+
+LabID.obsv.richness.sharedOTUsonly <- leech %>% select(dataset, Lab_ID, consensus.short, reads) %>%
+    # retain only OTUs that appear in both datasets
+        pivot_wider(id_cols = c(Lab_ID, consensus.short), names_from = dataset, values_from = reads, names_prefix = "reads.") %>%
+        filter(complete.cases(.)) %>%
+        pivot_longer(cols = c(reads.LSU, reads.SSU), names_prefix = "reads.", names_to = "dataset", values_to = "reads") %>%
+    # calculate observed richness per Lab_ID
+        mutate(occupied = ifelse(reads > 0, 1, 0)) %>% 
+        group_by(dataset, Lab_ID) %>%
+        summarize(observed.richness = as.integer(sum(occupied, na.rm = TRUE))) %>%
+    # convert to wide format
+        ungroup() %>%
+        pivot_wider(id_cols = Lab_ID, names_from = dataset, values_from = observed.richness, names_prefix = "observed.richness.") %>%
+        filter(complete.cases(.)) %>%
+    # add back leech_qty (shouldn't matter whether we use LSU or SSU as they are the same samples)
+        left_join(leech %>% select(Lab_ID, leech_qty) %>% distinct(), by = "Lab_ID")
+```
+
+```{r FigS4a : observed richness per Lab_ID}
+# all OTUs
+
+    LabID.obsv.richness.allOTUs %>% filter(complete.cases(.)) %>%
+        # ggplot(aes(x = observed.richness.LSU, y = observed.richness.SSU, colour = leech_qty)) +
+        ggplot(aes(x = observed.richness.LSU, y = observed.richness.SSU)) +
+        geom_jitter(width = 0.2, height=0.2, alpha=0.4) +
+        geom_abline(slope=1, intercept=0, linetype="dotted") +
+        # scale_color_gradient(low = "blue", high = "red") + labs(col="# leeches   ") +
+        theme(aspect.ratio = 1) + labs(x="LSU observed species richness", y= "SSU observed species richness")
+    ggsave("figures/FigS4a_obsvrich_LabID_allOTUs.pdf", width=4, height=4)
+
+      # test statistical significance of correlation
+    temp <- LabID.obsv.richness.allOTUs %>%
+        filter(complete.cases(.)) %>%
+        select(observed.richness.LSU, observed.richness.SSU)
+    cor.test(x = temp$observed.richness.LSU, y = temp$observed.richness.SSU)   # cor = 0.6490133; t = 21.173, df = 616, p-value < 2.2e-16
+    rm(temp)
+
+# shared OTUs only
+
+    LabID.obsv.richness.sharedOTUsonly %>% filter(complete.cases(.)) %>%
+        # ggplot(aes(x = observed.richness.LSU, y = observed.richness.SSU, colour = leech_qty)) +
+        ggplot(aes(x = observed.richness.LSU, y = observed.richness.SSU)) +
+        geom_jitter(width = 0.2, height=0.2, alpha=0.4) +
+        geom_abline(slope=1, intercept=0, linetype="dotted") +
+        # scale_color_gradient(low = "blue", high = "red") + labs(col="# leeches   ") +
+        theme(aspect.ratio = 1) + labs(x="LSU observed species richness", y= "SSU observed species richness")
+    ggsave("figures/FigS4a_obsvrich_LabID_sharedOTUsonly.pdf", width=4, height=4)
+
+    # test statistical significance of correlation
+    temp <- LabID.obsv.richness.sharedOTUsonly %>%
+        filter(complete.cases(.)) %>%
+        select(observed.richness.LSU, observed.richness.SSU)
+    cor.test(x = temp$observed.richness.LSU, y = temp$observed.richness.SSU)   # cor = 0.6959101; t = 24.051, df = 616, p-value < 2.2e-16
+    rm(temp)
+```
+
+```{r FigS4b : observed richness per Lab_ID scatterplots with GLMs}
+# does observed richness increase with number of leeches per replicate?
+
+# estimate GLM regressions
+    lsu.glm <- glm(observed.richness.LSU ~ log(leech_qty), data = LabID.obsv.richness.allOTUs, family=poisson())
+    lsu.glm %>% summary()
+    ssu.glm <- glm(observed.richness.SSU ~ log(leech_qty), data = LabID.obsv.richness.allOTUs, family=poisson())
+    ssu.glm %>% summary()
+
+    lsu.predict <- data.frame(leech_qty = seq(1, 100, 1))
+    lsu.predict.temp <- predict(lsu.glm, list(leech_qty = lsu.predict$leech_qty), type="response", se.fit=TRUE)
+    lsu.predict$observed.richness <- lsu.predict.temp$fit
+    lsu.predict$richness.lower <- lsu.predict.temp$fit - lsu.predict.temp$se.fit
+    lsu.predict$richness.upper <- lsu.predict.temp$fit + lsu.predict.temp$se.fit
+    rm(lsu.predict.temp)
+
+    ssu.predict <- data.frame(leech_qty = seq(1, 100, 1))
+    ssu.predict.temp <- predict(ssu.glm, list(leech_qty = ssu.predict$leech_qty), type="response", se.fit=TRUE)
+    ssu.predict$observed.richness <- ssu.predict.temp$fit
+    ssu.predict$richness.lower <- ssu.predict.temp$fit - ssu.predict.temp$se.fit
+    ssu.predict$richness.upper <- ssu.predict.temp$fit + ssu.predict.temp$se.fit
+    rm(ssu.predict.temp)
+
+    richness.predict <- bind_rows(LSU  = lsu.predict, SSU = ssu.predict, .id="dataset")
+
+# draw scatterplots
+    LabID.obsv.richness.allOTUs %>%
+        pivot_longer(c("observed.richness.LSU", "observed.richness.SSU"), names_to = "dataset", names_prefix = "observed.richness.", values_to = "observed.richness") %>%
+        ggplot(aes(x = leech_qty, y = observed.richness)) +
+            geom_jitter(width=0.25, height=0.2, alpha=0.33) + facet_wrap("dataset") +
+            labs(x = "number of leeches per replicate ", y = "observed species richness") +
+            geom_path(data= richness.predict, col= "blue", size=1) +
+            geom_ribbon(data= richness.predict, aes(ymin = richness.lower, ymax = richness.upper),
+                fill= "blue", alpha = 0.4)
+    ggsave("figures/FigS4b_richness_numleeches_allOTUs.pdf", width = 7, height = 4)
+
+rm(lsu.glm, ssu.glm, lsu.predict, ssu.predict, richness.predict)
+```
+
+```{r calculate observed richness per Polygon_ID}
+# determine which Lab_IDs are represented in both datasets
+Lab_IDs.to.keep <- leech %>% select(dataset, Lab_ID) %>% mutate(dummy = 0) %>% distinct() %>%
+    pivot_wider(id_cols = Lab_ID, names_from = dataset, names_prefix = "dummy.", values_from = dummy) %>%
+    filter(complete.cases(.)) %>% select(Lab_ID)
+
+# calculate per-Polygon_ID richness (only counts Lab_IDs shared by SSU and LSU datasets) -- all OTUs
+PolygonID.obsv.richness.allOTUs <- leech %>% select(dataset, Lab_ID, Polygon_ID, consensus.short, reads) %>%
+    # filter to shared Lab_IDs only
+        inner_join(Lab_IDs.to.keep, by = "Lab_ID") %>%
+    # calculate observed richness per Polygon_ID
+        mutate(occupied = ifelse(reads > 0, 1, 0)) %>% 
+        group_by(dataset, Polygon_ID, consensus.short) %>%
+        summarize(occupied = ifelse(sum(occupied) > 0, 1, 0)) %>%
+        group_by(dataset, Polygon_ID) %>%
+        summarize(observed.richness = as.integer(sum(occupied, na.rm = TRUE))) %>%
+    # convert to wide format
+        ungroup() %>%
+        pivot_wider(id_cols = Polygon_ID, names_from = dataset, values_from = observed.richness, names_prefix = "observed.richness.") %>%
+        filter(complete.cases(.))
+
+# calculate per-Polygon_ID richness (only counts Lab_IDs shared by SSU and LSU datasets) -- shared OTUs only
+PolygonID.obsv.richness.sharedOTUsonly <- leech %>% select(dataset, Lab_ID, Polygon_ID, consensus.short, reads) %>%
+    # filter to shared Lab_IDs only
+        inner_join(Lab_IDs.to.keep, by = "Lab_ID") %>%
+    # retain only OTUs that appear in both datasets
+        pivot_wider(id_cols = c(Polygon_ID, Lab_ID, consensus.short), names_from = dataset, values_from = reads, names_prefix = "reads.") %>%
+        filter(complete.cases(.)) %>%
+        pivot_longer(cols = c(reads.LSU, reads.SSU), names_prefix = "reads.", names_to = "dataset", values_to = "reads") %>%
+    # calculate observed richness per Polygon_ID
+        mutate(occupied = ifelse(reads > 0, 1, 0)) %>% 
+        group_by(dataset, Polygon_ID, consensus.short) %>%
+        summarize(occupied = ifelse(sum(occupied) > 0, 1, 0)) %>%
+        group_by(dataset, Polygon_ID) %>%
+        summarize(observed.richness = as.integer(sum(occupied, na.rm = TRUE))) %>%
+    # convert to wide format
+        ungroup() %>%
+        pivot_wider(id_cols = Polygon_ID, names_from = dataset, values_from = observed.richness, names_prefix = "observed.richness.") %>%
+        filter(complete.cases(.))
+
+# add counts of LabIDs (i.e. replicates, i.e. tubes) per PolygonID (only counts Lab_IDs shared by SSU and LSU datasets)
+    LabIDs.per.PolygonID <- leech %>% inner_join(Lab_IDs.to.keep, by = "Lab_ID") %>% distinct(dataset, Polygon_ID, Lab_ID) %>%
+        group_by(dataset, Polygon_ID) %>% summarize(replicates = n()) %>% ungroup() %>% distinct(Polygon_ID, replicates)
+    PolygonID.obsv.richness.allOTUs <- PolygonID.obsv.richness.allOTUs %>% left_join(LabIDs.per.PolygonID, by = "Polygon_ID")
+    PolygonID.obsv.richness.sharedOTUsonly <- PolygonID.obsv.richness.sharedOTUsonly %>% left_join(LabIDs.per.PolygonID, by = "Polygon_ID")
+
+rm(Lab_IDs.to.keep, LabIDs.per.PolygonID)
+```
+
+```{r FigS4c : observed richness per Polygon_ID}
+# all OTUs
+
+    PolygonID.obsv.richness.allOTUs %>% filter(complete.cases(.)) %>%
+        # ggplot(aes(x = observed.richness.LSU, y = observed.richness.SSU, colour = replicates)) +
+        ggplot(aes(x = observed.richness.LSU, y = observed.richness.SSU)) +
+        geom_jitter(width = 0.2, height=0.2, alpha=0.4) +
+        geom_abline(slope=1, intercept=0, linetype="dotted") +
+        theme(aspect.ratio = 1) + labs(x="LSU observed species richness", y= "SSU observed species richness") +
+        # scale_color_gradient(low = "blue", high = "red", breaks = seq(10, 30, 10)) + labs(col="# replicates") +
+        expand_limits(x = 0, y = 0)
+    ggsave("figures/FigS4c_obsvrich_PolygonID_allOTUs.pdf", width=4, height=4)
+
+    # test statistical significance of correlation
+        temp <- PolygonID.obsv.richness.allOTUs %>% filter(complete.cases(.)) %>% dplyr::select(observed.richness.LSU, observed.richness.SSU)
+        cor.test(x = temp$observed.richness.LSU, y = temp$observed.richness.SSU)  # cor = 0.8851508; t = 20.839, df = 120, p-value < 2.2e-16
+        rm(temp)
+        
+# shared OTUs only
+
+    PolygonID.obsv.richness.sharedOTUsonly %>% filter(complete.cases(.)) %>%
+        # ggplot(aes(x = observed.richness.LSU, y = observed.richness.SSU, colour = replicates)) +
+        ggplot(aes(x = observed.richness.LSU, y = observed.richness.SSU)) +
+        geom_jitter(width = 0.2, height=0.2, alpha=0.4) +
+        geom_abline(slope=1, intercept=0, linetype="dotted") +
+        theme(aspect.ratio = 1) + labs(x="LSU observed species richness", y= "SSU observed species richness") +
+        # scale_color_gradient(low = "blue", high = "red", breaks = seq(10, 30, 10)) + labs(col="# replicates") +
+        expand_limits(x = 0, y = 0)
+    ggsave("figures/FigS4c_obsvrich_PolygonID_sharedOTUsonly.pdf", width=4, height=4)
+
+    # test statistical significance of correlation
+        temp <- PolygonID.obsv.richness.sharedOTUsonly %>% filter(complete.cases(.)) %>% dplyr::select(observed.richness.LSU, observed.richness.SSU)
+        cor.test(x = temp$observed.richness.LSU, y = temp$observed.richness.SSU)  # cor = 0.90464; t = 23.253, df = 120, p-value < 2.2e-16
+        rm(temp)
+```
+
+```{r FigS4d : observed richness per Polygon_ID scatterplots with GLMs}
+# does observed richness increase with number of replicates per Polygon_ID?
+
+# estimate GLM regressions
+    lsu.glm <- glm(observed.richness.LSU ~ log(replicates), data = PolygonID.obsv.richness.allOTUs, family=poisson())
+    lsu.glm %>% summary()
+    ssu.glm <- glm(observed.richness.SSU ~ log(replicates), data = PolygonID.obsv.richness.allOTUs, family=poisson())
+    ssu.glm %>% summary()
+
+    lsu.predict <- data.frame(replicates = seq(0.5, 36, 0.5))
+    lsu.predict.temp <- predict(lsu.glm, list(replicates = lsu.predict$replicates), type="response", se.fit=TRUE)
+    lsu.predict$observed.richness <- lsu.predict.temp$fit
+    lsu.predict$observed.richness.lower <- lsu.predict.temp$fit - lsu.predict.temp$se.fit
+    lsu.predict$observed.richness.upper <- lsu.predict.temp$fit + lsu.predict.temp$se.fit
+    rm(lsu.predict.temp)
+
+    ssu.predict <- data.frame(replicates = seq(0.5, 36, 0.5))
+    ssu.predict.temp <- predict(ssu.glm, list(replicates = ssu.predict$replicates), type="response", se.fit=TRUE)
+    ssu.predict$observed.richness <- ssu.predict.temp$fit
+    ssu.predict$observed.richness.lower <- ssu.predict.temp$fit - ssu.predict.temp$se.fit
+    ssu.predict$observed.richness.upper <- ssu.predict.temp$fit + ssu.predict.temp$se.fit
+    rm(ssu.predict.temp)
+
+    richness.predict <- bind_rows(LSU  = lsu.predict, SSU = ssu.predict, .id="dataset")
+
+# draw scatterplots
+    PolygonID.obsv.richness.allOTUs %>%
+        pivot_longer(c("observed.richness.LSU", "observed.richness.SSU"), names_to = "dataset", names_prefix = "observed.richness.", values_to = "observed.richness") %>%
+        ggplot(aes(x = replicates, y = observed.richness)) +
+        geom_jitter() + facet_wrap("dataset") +
+        labs(x = "number of replicates per patrol area", y = "observed species richness") +
+        geom_path(data = richness.predict, col= "blue", size=1) +
+        geom_ribbon(data = richness.predict, aes(ymin = observed.richness.lower, ymax = observed.richness.upper),
+            fill= "blue", alpha = 0.4)
+    ggsave("figures/FigS4d_observed_richness_sampling_allOTUs.pdf", width = 7, height = 4)
+
+rm(lsu.glm, ssu.glm, lsu.predict, ssu.predict, richness.predict)
+```
+
+```{r calculate estimated richnesses from model23a in each dataset}
+# get estimated richness values
+    LSU.model23a.richness <- Nsite.output[["LSU"]][["model23a"]] %>%
+        rename(model23a.richness = mean) %>%
+        select(Polygon_ID, model23a.richness) %>% 
+        mutate(dataset = "LSU")
+    SSU.model23a.richness <- Nsite.output[["SSU"]][["model23a"]] %>%
+        rename(model23a.richness = mean) %>%
+        select(Polygon_ID, model23a.richness) %>% 
+        mutate(dataset = "SSU")
+    PolygonID.estimated.richness.allOTUs <- bind_rows(LSU.model23a.richness, SSU.model23a.richness) %>% select(dataset, Polygon_ID, everything())
+    
+# add number of replicates (=tubes) per Polygon_ID in each dataset (actual replicates, not the dummy ones in leech.supplement)
+    Lab_IDs.per.Polygon_ID <- leech %>%
+        select(dataset, Polygon_ID, Lab_ID) %>% distinct() %>%
+        group_by(dataset, Polygon_ID) %>% summarize(replicates = n())
+    PolygonID.estimated.richness.allOTUs <- PolygonID.estimated.richness.allOTUs %>%
+        left_join(Lab_IDs.per.Polygon_ID, by = c("dataset", "Polygon_ID"))
+
+# reformat as wide data and calculate mean number of replicates
+# (use mean for Fig S2e because models use Lab_IDs regardless of whether they match across LSU/SSU, so these counts may differ)
+    
+    PolygonID.estimated.richness.allOTUs <- PolygonID.estimated.richness.allOTUs %>%
+        pivot_wider(id_cols = Polygon_ID, names_from = dataset, names_sep = ".", values_from = c("model23a.richness", "replicates")) %>%
+        rowwise() %>% mutate(replicates.mean = mean(c(replicates.LSU, replicates.SSU))) %>% ungroup()
+    
+rm(LSU.model23a.richness, SSU.model23a.richness, Lab_IDs.per.Polygon_ID)
+```
+
+```{r FigS4e : model23a richness per Polygon_ID}}
+PolygonID.estimated.richness.allOTUs %>% filter(complete.cases(.)) %>%
+    # ggplot(aes(x = model23a.richness.LSU, y = model23a.richness.SSU, colour = replicates.mean)) +
+    ggplot(aes(x = model23a.richness.LSU, y = model23a.richness.SSU)) +
+    geom_point(alpha=0.4) +
+    geom_abline(slope=1, intercept=0, linetype="dotted") +
+    theme(aspect.ratio = 1) + labs(x="LSU estimated species richness", y= "SSU estimated species richness") +
+    # scale_color_gradient(low = "blue", high = "red", breaks = seq(10, 30, 10)) + labs(col="# replicates") +
+    expand_limits(x = 13, y = 13)
+ggsave("figures/FigS4e_model23a_richness_PolygonID_allOTUs.pdf", width=4, height=4)
+
+    # test statistical significance of correlation
+        temp <- PolygonID.estimated.richness.allOTUs %>% filter(complete.cases(.)) %>% dplyr::select(model23a.richness.LSU, model23a.richness.SSU)
+        cor.test(x = temp$model23a.richness.LSU, y = temp$model23a.richness.SSU)  # cor = 0.8350302; t = 16.625, df = 120, p-value < 2.2e-16
+        rm(temp)
+
+```
+
+```{r}
+# does estimated richness increase with number of replicates per Polygon_ID?
+
+# regressions are non-significant
+# (note use of linear regression rather than poisson GLM since estimates are not integer like observed values are)
+
+    lsu.lm <- lm(model23a.richness.LSU ~ log(replicates.LSU), data = PolygonID.estimated.richness.allOTUs)
+    lsu.lm %>% summary() # F-statistic: 0.0129 on 1 and 124 DF,  p-value: 0.9098
+    ssu.lm <- lm(model23a.richness.SSU ~ log(replicates.SSU), data = PolygonID.estimated.richness.allOTUs)
+    ssu.lm %>% summary() # F-statistic: 0.3374 on 1 and 125 DF,  p-value: 0.5624
+
+# so draw scatterplots without LOESS or regression lines
+
+    PolygonID.estimated.richness.allOTUs %>% 
+        pivot_longer(c("model23a.richness.LSU", "model23a.richness.SSU"), names_to = "dataset", names_prefix = "model23a.richness.", values_to = "model23a.richness") %>%
+        mutate(replicates = ifelse(dataset == "LSU", replicates.LSU, replicates.SSU)) %>%
+        select(-replicates.mean, -replicates.LSU, -replicates.SSU) %>%
+        filter(complete.cases(.)) %>%
+        ggplot(aes(x = replicates,  y= model23a.richness)) +
+        geom_jitter() + facet_wrap("dataset") +
+        labs(x = "number of replicates per patrol area", y = "estimated species richness")
+    ggsave("figures/FigS4f_estimated_richness_sampling_allOTUs.pdf", width = 7, height = 4)
+```
+
+```{r}
+
+```
+

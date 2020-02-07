@@ -1,0 +1,122 @@
+---
+title: "Ailaoshan_occupancy_networks.Rmd"
+author: "Chris Baker"
+email: "bakerccm@gmail.com"
+date: "10/12/2018"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+library(tidyverse)
+library("gplots")
+library("ggrepel")
+library("RColorBrewer")
+#library("vegan")
+#library("unmarked")
+library("R2jags")
+knitr::opts_knit$set(root.dir = "/Users/chris/Documents/work/leeches/leeches2018/analysis/bayesian")
+```
+
+```{r clear old variables, include=FALSE}
+rm(list=ls())
+```
+
+```{r read in raw data, include=FALSE}
+# generated with Ailaoshan_OTU_table.Rmd
+load(file="../Ailaoshan_OTU_table.Rdata")
+```
+
+```{r}
+# draw bipartite network; two node types are OTUs from the two different datasets
+# edges represent rep-wise correlation or something like that
+# then pare down network?
+
+#install.packages("igraph")
+#install.packages("network")
+
+#install.packages("sna")
+#install.packages("visNetwork")
+#install.packages("threejs")
+#install.packages("networkD3")
+#install.packages("ndtv")
+
+library("igraph")
+library("network")
+
+# calculate all pairwise spearman correlations
+
+# this should probably make use of the imputed occurences rather than the raw observations, but this will do for now
+tmp.LSU <- leech$LSU$samples %>% select(Polygon_ID, replicate_id) %>%
+    bind_cols(leech$LSU$incidence %>% rename_all(.funs = function (X) paste0("LSU.",X)))
+tmp.SSU <- leech$SSU$samples %>% select(Polygon_ID, replicate_id) %>%
+    bind_cols(leech$SSU$incidence %>% rename_all(.funs = function (X) paste0("SSU.",X)))
+tmp.all <- inner_join(tmp.LSU, tmp.SSU, by = c("Polygon_ID", "replicate_id"))
+
+OTU.cor <- cor(x = tmp.all %>% select(starts_with("LSU")), y = tmp.all %>% select(starts_with("SSU")), method="spearman")
+rownames(OTU.cor) <- rownames(OTU.cor) %>% gsub("LSU.", "", .)  # each row is an OTU in the LSU dataset
+colnames(OTU.cor) <- colnames(OTU.cor) %>% gsub("SSU.", "", .)  # each col is an OTU in the SSU dataset
+OTU.cor[is.na(OTU.cor)] <- 0
+OTU.cor[OTU.cor < 0] <- 0
+
+rm(tmp.LSU, tmp.SSU, tmp.all)
+
+OTU.graph <- graph.incidence(OTU.cor, weighted = T)  # so OTU.cor is used as the adjacency matrix
+
+V(OTU.graph)$type[V(OTU.graph)$type == FALSE] <- "LSU"
+V(OTU.graph)$type[V(OTU.graph)$type == TRUE] <- "SSU"
+
+V(OTU.graph)$color <- V(OTU.graph)$type %>% gsub("LSU","blue",.) %>% gsub("SSU","red",.)
+
+# add taxonomic classes
+    V(OTU.graph)$class <- NA
+    V(OTU.graph)$class[V(OTU.graph)$type == "LSU"] <- leech$LSU$taxa$Class[match(V(OTU.graph)$name[V(OTU.graph)$type == "LSU"], leech$LSU$taxa$Taxonomy_short,0)]
+    V(OTU.graph)$class[V(OTU.graph)$type == "SSU"] <- leech$SSU$taxa$Class[match(V(OTU.graph)$name[V(OTU.graph)$type == "SSU"], leech$SSU$taxa$Taxonomy_short,0)]
+
+# set some graphical parameters
+    V(OTU.graph)$label.family <- "Helvetica"
+    V(OTU.graph)$size <- 6
+    V(OTU.graph)$shape <- "circle"
+    V(OTU.graph)$frame.color <- NA
+    V(OTU.graph)$label.cex <- 0.6
+    V(OTU.graph)$label.degree <- 0
+    V(OTU.graph)$label.dist <- 3
+    V(OTU.graph)$label.color <- V(OTU.graph)$color
+
+    E(OTU.graph)$width <- E(OTU.graph)$weight * 10
+
+    E(OTU.graph)$color <- ifelse(head_of(OTU.graph,E(OTU.graph))$name == tail_of(OTU.graph,E(OTU.graph))$name, "black", "lightgrey")
+
+# set threshold for edges
+    OTU.graph <- delete_edges(OTU.graph, which(E(OTU.graph)$weight < 0.1))
+    OTU.graph <- delete_vertices(OTU.graph, degree(OTU.graph) == 0)
+
+# plot just mammals
+    OTU.graph.mammals <- delete_vertices(OTU.graph, V(OTU.graph)$class != "Mammalia")
+    OTU.graph.mammals <- delete_vertices(OTU.graph.mammals, degree(OTU.graph.mammals) == 0)
+    pdf("mammals.pdf", width=6, height=6)
+        plot(OTU.graph.mammals, main="mammals")
+        legend("topleft", legend=c("   LSU","   SSU"), col = c("blue","red"), bty = "n", pch=20 , pt.cex = 2, cex = 0.75, horiz = FALSE, inset = c(0.0775, 0.0))
+        legend("topleft", legend=c("OTUs matched","OTUs unmatched"), col = c("black","lightgrey"), bty = "n", lwd=3, cex = 0.75, horiz = FALSE, inset = c(0.051, 0.08))
+    dev.off()
+    rm(OTU.graph.mammals)
+# plot just birds
+    OTU.graph.birds <- delete_vertices(OTU.graph, V(OTU.graph)$class != "Aves")
+    OTU.graph.birds <- delete_vertices(OTU.graph.birds, degree(OTU.graph.birds) == 0)
+    pdf("birds.pdf", width=6, height=6)
+        plot(OTU.graph.birds, main="birds")
+        legend("topleft", legend=c("   LSU","   SSU"), col = c("blue","red"), bty = "n", pch=20 , pt.cex = 2, cex = 0.75, horiz = FALSE, inset = c(0.0775, 0.0))
+        legend("topleft", legend=c("OTUs matched","OTUs unmatched"), col = c("black","lightgrey"), bty = "n", lwd=3, cex = 0.75, horiz = FALSE, inset = c(0.051, 0.08))
+    dev.off()
+    rm(OTU.graph.birds)
+# plot just amphibians
+    OTU.graph.amphibians <- delete_vertices(OTU.graph, V(OTU.graph)$class != "Amphibia")
+    OTU.graph.amphibians <- delete_vertices(OTU.graph.amphibians, degree(OTU.graph.amphibians) == 0)
+    pdf("amphibians.pdf", width=6, height=6)
+        plot(OTU.graph.amphibians, main="amphibians")
+        legend("topleft", legend=c("   LSU","   SSU"), col = c("blue","red"), bty = "n", pch=20 , pt.cex = 2, cex = 0.75, horiz = FALSE, inset = c(0.0775, 0.0))
+        legend("topleft", legend=c("OTUs matched","OTUs unmatched"), col = c("black","lightgrey"), bty = "n", lwd=3, cex = 0.75, horiz = FALSE, inset = c(0.051, 0.08))
+    dev.off()
+    rm(OTU.graph.amphibians)
+
+
+```

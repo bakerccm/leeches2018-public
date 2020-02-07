@@ -1,0 +1,137 @@
+---
+title: "Ailaoshan_exportfasta.Rmd"
+author: "Chris Baker"
+email: "bakerccm@gmail.com"
+date: "06/01/2020"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+library("tidyverse")
+library("seqinr")
+```
+
+```{r clear old variables, include=FALSE}
+rm(list=ls())
+```
+
+```{r read in preOTU data, include=FALSE}
+# generated with Ailaoshan_OTU_table.Rmd
+# -- includes preOTU data that can be used to convert preOTU numbers to OTU numbers, as well as add metadata
+    load(file="../Ailaoshan_OTU_table_preOTUs.Rdata")
+```
+
+```{r read in sequence data, include=FALSE}
+rep.seqs <- list(
+    LSU = read.fasta(file = "LSU_16S_otu_table_swarm_lulu_20190624.fas",
+        as.string = TRUE, forceDNAtolower = FALSE, strip.desc = TRUE),
+    SSU = read.fasta(file = "SSU_12S_otu_table_swarm_lulu_20190624.fas",
+        as.string = TRUE, forceDNAtolower = FALSE, strip.desc = TRUE)
+)
+```
+
+```{r filter sequences from FASTA files}
+# remove sequences from FASTA files without matches in preOTUs.matched.summary
+# (these were discarded from the analysis, so don't include them in FASTA)
+
+filtered.rep.seqs <- list()
+for (i in names(rep.seqs)) {
+    filtered.rep.seqs[[i]] <- rep.seqs[[i]][names(rep.seqs[[i]]) %in% preOTUs.matched.summary[[i]]$queryID]
+}
+```
+
+```{r get new metadata to be used on output FASTA file}
+parsed.rep.seqs <- list()
+
+for (i in names(filtered.rep.seqs)) {
+    # start with queryID from the FASTA file (queryID is the preOTU identifier)
+    parsed.rep.seqs[[i]] <- tibble(queryID = getAnnot(filtered.rep.seqs[[i]]) %>% unlist(),
+            sequence = getSequence(filtered.rep.seqs[[i]], as.string= TRUE) %>% unlist()) %>%
+        # add correponding OTU number (OTU is the OTU identifier) and taxonomy
+            left_join(preOTUs.matched.summary[[i]] %>% select(queryID, OTU, consensus.short), by = "queryID") %>%
+        # add suffixes to OTU number for OTUs present multiple times (OTU.suffix is augmented OTU identifier)
+            # add dummy and counts within each OTU
+                group_by(OTU) %>%
+                mutate(dummy = 1, count = n()) %>%
+            # determine suffixes for OTUs present multiple times
+                mutate(suffix = cumsum(dummy)) %>%
+                mutate(suffix = paste0(".", suffix)) %>%
+                mutate(suffix = ifelse(count == 1, "", suffix)) %>%
+                ungroup() %>%
+            # add suffix to existing OTU name
+                mutate(OTU.suffix = paste0(OTU, suffix)) %>%
+        # make deflines for new FASTA file
+            mutate(defline = paste0(OTU.suffix, " ", consensus.short)) %>%
+        # clean up
+            select(queryID, OTU, OTU.suffix, consensus.short, defline, sequence) %>%
+            arrange(OTU.suffix)
+}
+```
+
+```{r write seqeunces to FASTA}
+## LSU ##
+
+LSU.filename <- "FileS3_LSU_representative_sequences.fasta"
+
+LSU.comment1 <- "# Ailaoshan representative sequences (LSU dataset)"
+LSU.comment2 <- "# The first six characters of each sequence identifier (e.g. LSU001) indicate the OTU that the sequence comes from. Identifiers with a suffix (e.g. LSU005.1) refer to OTUs that were formed by merging two or more pre-OTUs. In such cases, the representative sequence for each pre-OTU is provided, with the suffix distinguishing between them (e.g. LSU005.1 and LSU005.2 represent the two pre-OTUs that were merged to form the OTU LSU005)."
+
+cat(LSU.comment1, LSU.comment2, file = LSU.filename, sep = "\n", append = FALSE)
+write.fasta(sequences = as.list(parsed.rep.seqs$LSU$sequence),
+    names = parsed.rep.seqs$LSU$defline, file.out = LSU.filename, open = "a")
+
+## SSU ##
+
+SSU.filename <- "FileS4_SSU_representative_sequences.fasta"
+
+SSU.comment1 <- "# Ailaoshan representative sequences (SSU dataset)"
+SSU.comment2 <- "# The first six characters of each sequence identifier (e.g. SSU001) indicate the OTU that the sequence comes from. Identifiers with a suffix (e.g. SSU002.1) refer to OTUs that were formed by merging two or more pre-OTUs. In such cases, the representative sequence for each pre-OTU is provided, with the suffix distinguishing between them (e.g. SSU002.1 and SSU002.2 represent the two pre-OTUs that were merged to form the OTU SSU002)."
+
+cat(SSU.comment1, SSU.comment2, file = SSU.filename, sep="\n", append=FALSE)
+write.fasta(sequences = as.list(parsed.rep.seqs$SSU$sequence),
+    names = parsed.rep.seqs$SSU$defline, file.out = SSU.filename, open = "a")
+
+## clean up ##
+
+rm(LSU.filename, LSU.comment1, LSU.comment2, SSU.filename, SSU.comment1, SSU.comment2)
+```
+
+```{r}
+
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

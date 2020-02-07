@@ -1,0 +1,157 @@
+---
+title: "Ailaoshan_Table1_FigS1_covariates.Rmd"
+author: "Chris Baker"
+email: "bakerccm@gmail.com"
+date: "01/01/2019"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+library("gplots")
+library("ggrepel")
+library("RColorBrewer")
+library("vegan")
+library("ggfortify")
+library("dendextend")
+
+library("scales")
+
+library("sf")
+#library("viridis")
+#library("raster")
+#library("rgdal")
+#library("fasterize")
+#library("rasterVis")
+#library("rgl")
+#library("magick")
+
+library(tidyverse)
+#library("egg")
+
+#library("expandFunctions")
+#reset.warnings()
+```
+
+```{r clear old variables, include=FALSE}
+rm(list=ls())
+```
+
+```{r read in MCMC output and GIS output for drawing maps, include=FALSE}
+# generated with Ailaoshan_occupancy_MCMC_postprocess.Rmd
+    load(file="/Users/chris/Documents/work/leeches/leeches2018//Ailaoshan_occupancy_MCMC_postprocess.Rdata")
+    # should have in it:
+    #    leeech, z.output, psi.output, Nsite.output, lpsi0.output, lp0.output, occ.output
+# load Ailaoshan processed GIS data
+    load(file="/Users/chris/Documents/work/leeches/leeches2018/gis/ailaoshan_gis.Rdata")
+```
+
+```{r pull out environmental covariates and summarize per Polygon_ID}
+# data should be the same for all Lab_IDs in a Polygon_ID, so taking mean is a just a convenient way to condense these data from Lab_IDs to Polygon_IDs
+env.data <- leeech$LSU$samples %>%
+    dplyr::select(Polygon_ID, elevation_median, elevation_median, tpi_median, distance_to_road_median, distance_to_stream_median, distance_to_nature_reserve_boundary) %>%
+    group_by(Polygon_ID) %>% summarize_all(mean) %>% ungroup()
+```
+
+```{r draw maps showing env covariates}
+ailaoshan.polygons.env <- ailaoshan.polygons %>% mutate(Polygon_ID = as.character(Polygon_ID)) %>% left_join(env.data, by="Polygon_ID") %>% rename(elevation = elevation_median, TPI = tpi_median.y, road = distance_to_road_median, stream = distance_to_stream_median, reserve = distance_to_nature_reserve_boundary)
+
+ailaoshan.polygons.env %>%
+    ggplot() + geom_sf(aes(fill = elevation), size = 0.1, color = "black") +
+        theme(legend.position = c(0,0), legend.justification = c(0,0), legend.background = element_rect(fill = NA)) +
+        coord_sf() + labs(fill = "elevation (m)")
+ggsave("figures/FigS1a_elevation.pdf", width=4, height=4)
+
+ailaoshan.polygons.env %>%
+    ggplot() + geom_sf(aes(fill = TPI), size = 0.1, color = "black") +
+        theme(legend.position = c(0,0), legend.justification = c(0,0), legend.background = element_rect(fill = NA)) +
+        coord_sf()
+ggsave("figures/FigS1c_TPI.pdf", width=4, height=4)
+
+ailaoshan.polygons.env %>%
+    ggplot() + geom_sf(aes(fill = road), size = 0.1, color = "black") +
+        theme(legend.position = c(0,0), legend.justification = c(0,0), legend.background = element_rect(fill = NA)) +
+        coord_sf() + labs(fill = "road (m)")
+ggsave("figures/FigS1e_road.pdf", width=4, height=4)
+
+ailaoshan.polygons.env %>%
+    ggplot() + geom_sf(aes(fill = stream), size = 0.1, color = "black") +
+        theme(legend.position = c(0,0), legend.justification = c(0,0), legend.background = element_rect(fill = NA)) +
+        coord_sf() + labs(fill = "stream (m)")
+ggsave("figures/FigS1g_stream.pdf", width=4, height=4)
+
+ailaoshan.polygons.env %>%
+    ggplot() + geom_sf(aes(fill = reserve), size = 0.1, color = "black") +
+        theme(legend.position = c(0,0), legend.justification = c(0,0), legend.background = element_rect(fill = NA)) +
+        coord_sf() + labs(fill = "reserve (m)")
+ggsave("figures/FigS1i_reserve.pdf", width=4, height=4)
+```
+
+```{r histograms for environmental covariates}
+# filter
+    env.data.actual <- env.data %>%
+        rename(elevation = elevation_median, TPI = tpi_median, road = distance_to_road_median,
+            stream = distance_to_stream_median, reserve = distance_to_nature_reserve_boundary) %>%
+        filter(substr(Polygon_ID,1,1) != "R") # remove Polygon_IDs that are just a ranger ID (these don't have environmental data anyway)
+
+env.data.actual %>% ggplot(aes(x = elevation)) + geom_histogram() +
+    labs(x = "median elevation (m)")
+ggsave("figures/FigS1b_elevation.pdf", width=3.2, height=4)
+
+env.data.actual %>% ggplot(aes(x = TPI)) + geom_histogram() +
+    labs(x = "median TPI")
+ggsave("figures/FigS1d_TPI.pdf", width=3.2, height=4)
+
+env.data.actual %>% ggplot(aes(x = road)) + geom_histogram() +
+    labs(x = "median distance to road (m)")
+ggsave("figures/FigS1f_road.pdf", width=3.2, height=4)
+
+env.data.actual %>% ggplot(aes(x = stream)) + geom_histogram() +
+    labs(x = "median distance to stream (m)")
+ggsave("figures/FigS1h_stream.pdf", width=3.2, height=4)
+
+env.data.actual %>% ggplot(aes(x = reserve)) + geom_histogram() +
+    labs(x = "median distance to reserve boundary (m)")
+ggsave("figures/FigS1j_reserve.pdf", width=3.2, height=4)
+
+rm(env.data.actual)
+```
+
+
+
+
+```{r summary table for environmental covariates}
+# table 1 in manuscript
+
+# filter
+    env.data.actual <- env.data %>%
+        filter(substr(Polygon_ID,1,1) != "R") # remove Polygon_IDs that are just a ranger ID (these don't have environmental data anyway)
+
+# summarize
+    env.data.actual.mean <- env.data.actual %>% dplyr::select(-Polygon_ID) %>% summarize_all(.funs=mean)
+    env.data.actual.sd <- env.data.actual %>% dplyr::select(-Polygon_ID) %>% summarize_all(.funs=sd)
+    env.data.actual.min <- env.data.actual %>% dplyr::select(-Polygon_ID) %>% summarize_all(.funs=min)
+    env.data.actual.max <- env.data.actual %>% dplyr::select(-Polygon_ID) %>% summarize_all(.funs=max)
+
+# concatenate
+    bind_rows(mean = env.data.actual.mean, sd = env.data.actual.sd, min = env.data.actual.min, max = env.data.actual.max, .id="summary")
+
+rm(env.data.actual, env.data.actual.mean, env.data.actual.sd, env.data.actual.min, env.data.actual.max)
+```
+
+```{r fraction of Polygon_IDs with sequence data}
+leeech$LSU$tidy %>%
+    group_by(Polygon_ID) %>%
+    summarize (reads = sum(reads)) %>%
+    filter(substr(Polygon_ID,1,1) != "R") %>%
+    ungroup() %>%
+    mutate(has.reads = (!is.na(reads) & reads > 0)) %>%
+    dplyr::select(has.reads) %>% table(.)
+
+leeech$SSU$tidy %>%
+    group_by(Polygon_ID) %>%
+    summarize (reads = sum(reads)) %>%
+    filter(substr(Polygon_ID,1,1) != "R") %>%
+    ungroup() %>%
+    mutate(has.reads = (!is.na(reads) & reads > 0)) %>%
+    dplyr::select(has.reads) %>% table(.)
+```

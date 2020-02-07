@@ -1,0 +1,335 @@
+---
+title: "Ailaoshan_descriptive.Rmd"
+author: "Chris Baker"
+email: "bakerccm@gmail.com"
+date: "21/10/2019"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+library("tidyverse")
+library("vegan")
+```
+
+```{r clear old variables, include=FALSE}
+rm(list=ls())
+```
+
+```{r read in raw data and MCMC output, include=FALSE}
+# generated with Ailaoshan_OTU_table.Rmd
+# already includes environmental data, since that is processed
+# prior to Ailaoshan_OTU_table.Rmd and loaded as part of that
+    load(file="../Ailaoshan_OTU_table.Rdata")
+```
+
+```{r some summary counts}
+leech %>% group_by(dataset) %>%
+    summarise(
+        number.PolygonIDs = length(unique(Polygon_ID)),
+        number.LabIDs = length(unique(Lab_ID)),
+        number.OTUs = length(unique(OTU)))
+```
+
+```{r}
+# most Ranger_IDs are associated with one polygon, but some are associated with >1.
+# DY:  yes.  some rangers patrol more than one polygon (neighbouring polygons)
+
+    leech %>% group_by(dataset, Ranger_ID) %>%
+        summarise(number.Polygon_IDs = length(unique(Polygon_ID))) %>%
+        select(dataset, number.Polygon_IDs) %>% table()
+
+# Note that some Ranger_IDs that are associated with 1 Polygon_ID were actually associated with
+# no polygons originally (this field was NA) and the Polygon_ID is just the Ranger_ID.
+
+    leech %>% filter(is.na(Polygon_ID_original)) %>%
+        group_by(dataset, Ranger_ID) %>%
+        summarise(number.Polygon_IDs = length(unique(Polygon_ID))) %>%
+        select(dataset, number.Polygon_IDs) %>% table()
+```
+
+```{r leeches and Lab_IDs}
+# number of leeches in each dataset
+# note these are just the ones that made it through to the OTU table
+# LSU = 23774, SSU = 26775
+
+    leech %>% 
+        distinct(dataset, Lab_ID, leech_qty) %>%
+        group_by(dataset) %>%
+        summarise(total.leeches = sum(leech_qty))
+
+# some Lab_IDs have zero species observed OTU richness (because they only matched to humans -- the one
+# Lab_ID that had no OTUs in the LSU dataset after excluding humans was taken out altogether)
+
+    leech %>% group_by(dataset, Lab_ID) %>%
+        summarise(observed.richness = sum(reads > 0)) %>%
+        group_by(dataset) %>% dplyr::select(dataset, observed.richness) %>% table()
+
+    leech %>% group_by(dataset, Lab_ID) %>%
+        summarise(observed.richness = sum(reads > 0)) %>%
+        group_by(dataset) %>% filter(observed.richness > 0) %>% tally() # LSU: 553, SSU: 675 Lab_IDs with at least one non-human OTU
+    
+# number of leeches per Lab_ID
+
+    leech %>% 
+        distinct(dataset, Lab_ID, leech_qty) %>%
+        group_by(dataset) %>%
+        summarise(mean.leech_qty = mean(leech_qty), # LSU: 36.40735, SSU 36.18243
+            sd.leech_qty = sd(leech_qty), # LSU: 18.91909, SSU 18.42684
+            median.leech_qty = median(leech_qty), # LSU 35, SSU 34
+            min.leech_qty = min(leech_qty),
+            max.leech_qty = max(leech_qty))
+    
+    leech %>%
+        distinct(dataset, Lab_ID, leech_qty) %>%
+        ggplot(aes(x=leech_qty)) + geom_histogram(bins = 10) + facet_wrap(~dataset) # positive skew in both datasets
+
+```
+
+```{r rangers and samples}
+# number of rangers
+
+    leech %>% group_by(dataset) %>%
+        summarise(number.RangerIDs = length(unique(Ranger_ID))) # LSU: 125 rangers, SSU: 126 rangers
+
+# how many Lab_IDs were associated with each Ranger_ID?
+# (note this differs from calculations above that examine Polygon_IDs per Ranger_ID)
+
+    leech %>% group_by(dataset, Ranger_ID) %>%
+        summarise(number.Lab_IDs = length(unique(Lab_ID))) %>%
+        select(dataset, number.Lab_IDs) %>% table()
+```
+```{r polygons and samples}
+# number of polygons
+
+    leech %>% group_by(dataset) %>%
+        summarise(number.PolygonIDs = length(unique(Polygon_ID))) # LSU: 126 polygons, SSU: 127 polygons
+
+# how many polygons were actually real polygons?
+# imputed Polygon_IDs are those derived from Ranger_IDs
+# real Polygon_IDs are actual polygons on the ground
+# LSU: 35 imputed, 91 real; SSU: 34 imputed, 93 real
+
+    leech %>%
+        mutate(polygon.type = ifelse(substr(Polygon_ID,1,1) == "R", "imputed", "real")) %>%
+        distinct(dataset, Polygon_ID, polygon.type) %>%
+        group_by(dataset, polygon.type) %>% tally()
+
+# how many Lab_IDs were associated with each Polygon_ID?
+
+    leech %>% group_by(dataset, Polygon_ID) %>%
+        summarise(number.Lab_IDs = length(unique(Lab_ID))) %>%
+        select(dataset, number.Lab_IDs) %>% table()
+
+# mean/median number of Lab_IDs associated with each Polygon_ID
+
+    LabIDs.per.PolygonID <- leech %>% group_by(dataset, Polygon_ID) %>%
+        summarise(number.Lab_IDs = length(unique(Lab_ID))) %>%
+        group_by(dataset)
+    
+    LabIDs.per.PolygonID %>%
+        summarise(mean.number.Lab_IDs = mean(number.Lab_IDs), # LSU: 5.182540, SSU: 5.826772
+            median.number.Lab_IDs = median(number.Lab_IDs)) # LSU: 3, SSU: 4
+    
+    LabIDs.per.PolygonID %>%
+        ggplot(aes(x=number.Lab_IDs)) + stat_count() + facet_wrap("dataset") +
+            labs(x="LabIDs per PolygonID", y="number of PolygonIDs")
+    
+    rm(LabIDs.per.PolygonID)
+```
+
+```{r species}
+# how many species did we observe in total
+# LSU: 59 OTUs excluding humans, SSU: 72 OTUs excluding humans
+
+    leech %>% 
+        group_by(dataset, OTU) %>% filter(sum(reads) > 0) %>%
+        group_by(dataset) %>% distinct(dataset, OTU) %>% tally()
+
+# how many OTUs were identified to species level?
+# 58 identified to species level
+
+    leech %>%
+        select(consensus.short, consensus.species) %>%
+        distinct() %>%
+        mutate(identified.to.species = !grepl("\\d", consensus.species)) %>%
+        group_by(identified.to.species) %>% tally()
+
+# how many species were detected in each Lab_ID?
+    
+    richness.per.LabID <- leech %>% group_by(dataset, Lab_ID) %>%
+        summarise(richness = sum(reads>0))
+    
+    richness.per.LabID %>% ggplot(aes(x=richness)) + stat_count() + facet_wrap("dataset") +
+            labs(x="OTUs per LabID", y="number of LabIDs")
+    
+    richness.per.LabID %>% group_by(dataset) %>%
+        summarise(mean.richness = mean(richness), # LSU: 1.448698, SSU: 1.956757
+            median.richness = median(richness)) # LSU: 1, SSU: 2
+    
+    rm(richness.per.LabID)
+    
+# how many species were detected in each Polygon_ID?
+
+    richness.per.PolygonID <- leech %>%
+        group_by(dataset, Polygon_ID, OTU) %>% summarise(present = ifelse(sum(reads)>0, 1, 0)) %>%
+        group_by(dataset, Polygon_ID) %>% summarise(richness = sum(present))
+    
+    richness.per.PolygonID %>% ggplot(aes(x=richness)) + stat_count() + facet_wrap("dataset") +
+            labs(x="OTUs per PolygonID", y="number of PolygonIDs")
+    
+    richness.per.PolygonID %>% group_by(dataset) %>%
+        summarise(mean.richness = mean(richness), # LSU: 3.349206, SSU: 5.464567
+            median.richness = median(richness)) # LSU: 3, SSU: 4
+    
+    rm(richness.per.PolygonID)
+
+# how many Lab_IDs or Polygon_IDs was each species detected in?
+    
+    # median number of Lab_IDs per OTU
+    leech %>%
+        group_by(dataset, OTU) %>% summarise(num.LabIDs = sum(reads>0)) %>%
+        group_by(dataset) %>% summarise(median.num.LabIDs = median(num.LabIDs))
+
+    # median number of Polygon_IDs per OTU
+    leech %>%
+        group_by(dataset, Polygon_ID, OTU) %>% summarise(present = ifelse(sum(reads)>0, 1, 0)) %>%
+        group_by(dataset, OTU) %>% summarise(num.PolygonIDs = sum(present)) %>%
+        group_by(dataset) %>% summarise(median.num.PolygonIDs = median(num.PolygonIDs))
+
+```
+
+```{r observed species and Polygon_ID characteristics}
+temp <- leech %>% filter(!is.na(latitude)) %>%
+    group_by(dataset, Polygon_ID, OTU, shape_area_ha, shape_perimeter, elevation_mean,
+        distance_to_nature_reserve_boundary, tpi_mean, distance_to_stream_mean, distance_to_road_median) %>%
+    summarise(present = ifelse(sum(reads) > 0, 1, 0)) %>%
+    group_by(dataset, Polygon_ID, shape_area_ha, shape_perimeter, elevation_mean,
+        distance_to_nature_reserve_boundary, tpi_mean, distance_to_stream_mean, distance_to_road_median) %>%
+    summarise(richness = sum(present))
+
+# size of polygons
+    # perimeter ... no effect
+        temp %>% ggplot(aes(x = shape_perimeter, y = richness)) + geom_point() +
+            geom_smooth(aes(x = shape_perimeter, y=richness), method = "loess") + facet_wrap("dataset")
+    # area ... nope
+        temp %>% ggplot(aes(x = shape_perimeter, y = richness)) + geom_point() +
+            geom_smooth(aes(x = shape_perimeter, y = richness), method = "loess") + facet_wrap("dataset")
+        
+# elevation and distance to park edge are positively related to observed species richness
+    # greater species richness at higher elevations
+        temp %>% ggplot(aes(x = elevation_mean, y = richness)) + geom_point() +
+            geom_smooth(aes(x = elevation_mean, y = richness), method = "loess") + facet_wrap("dataset")
+    # positive correlation with distance to nature reserve boundary
+        temp %>% ggplot(aes(x = distance_to_nature_reserve_boundary, y = richness)) + geom_point() +
+            geom_smooth(aes(x = distance_to_nature_reserve_boundary, y = richness), method = "loess") + facet_wrap("dataset")
+    # distance_to_nature_reserve_boundary and elevation_mean are positively correlated
+        leech %>% filter(!is.na(latitude)) %>%
+            distinct(Lab_ID, Polygon_ID, distance_to_nature_reserve_boundary, elevation_mean) %>%
+            ggplot(aes(x = distance_to_nature_reserve_boundary, y = elevation_mean)) + geom_point()
+
+# not much to see in relation to TPI
+    temp %>% ggplot(aes(x = tpi_mean, y = richness)) + geom_point() +
+            geom_smooth(aes(x=tpi_mean, y=richness), method = "loess") + facet_wrap("dataset")
+# not much to see with distance to stream
+    temp %>% ggplot(aes(x = distance_to_stream_mean, y = richness)) + geom_point() +
+            geom_smooth(aes(x=distance_to_stream_mean, y=richness), method = "loess") + facet_wrap("dataset")
+# mild positive correlation with distance to road
+    temp %>% ggplot(aes(x = distance_to_road_median, y = richness)) + geom_point() +
+            geom_smooth(aes(x=distance_to_road_median, y=richness), method = "loess") + facet_wrap("dataset")
+    
+rm(temp)
+```
+
+```{r most commonly observed OTUs by Lab_ID}
+# how many Lab_IDs was each OTU found in?
+    LabIDs.per.OTU <- leech %>%
+        group_by(dataset, OTU, consensus.class, consensus.order, consensus.family, consensus.genus, consensus.short) %>%
+        summarise(number.LabIDs.present = sum(reads>0), number.LabIDs.absent = sum(reads == 0))
+
+    LabIDs.per.OTU
+
+# (note that aggregated results below are occurrences of the OTUs, not of the higher level taxa -- e.g. two amphibian OTUs
+# that were both observed in a Lab_ID would count twice towards Amphibia, not once).
+
+# class
+LabIDs.per.OTU %>% group_by(dataset, consensus.class) %>%
+    summarise(number.LabID.observations = sum(number.LabIDs.present)) %>% arrange(dataset, desc(number.LabID.observations))
+
+# order
+LabIDs.per.OTU %>% group_by(dataset, consensus.class, consensus.order) %>%
+    summarise(number.LabID.observations = sum(number.LabIDs.present)) %>% arrange(dataset, desc(number.LabID.observations))
+
+# family
+LabIDs.per.OTU %>% group_by(dataset, consensus.class, consensus.order, consensus.family) %>%
+    summarise(number.LabID.observations = sum(number.LabIDs.present)) %>% arrange(dataset, desc(number.LabID.observations))
+
+# genus
+LabIDs.per.OTU %>% group_by(dataset, consensus.class, consensus.order, consensus.family, consensus.genus) %>%
+    summarise(number.LabID.observations = sum(number.LabIDs.present)) %>% arrange(dataset, desc(number.LabID.observations))
+
+# species
+LabIDs.per.OTU %>% group_by(dataset, consensus.class, consensus.order, consensus.family, consensus.genus, consensus.family, consensus.short) %>%
+    summarise(number.LabID.observations = sum(number.LabIDs.present)) %>% arrange(dataset, desc(number.LabID.observations))
+
+rm(LabIDs.per.OTU)
+```
+
+```{r most commonly observed OTUs by Polygon_ID}
+# how many Polygon_IDs was each OTU found in?
+    PolygonIDs.per.OTU <- leech %>%
+        group_by(dataset, OTU, Polygon_ID, consensus.class, consensus.order, consensus.family, consensus.genus, consensus.short) %>%
+        summarise(present = ifelse(sum(reads)>0, TRUE, FALSE)) %>%
+        group_by(dataset, OTU, consensus.class, consensus.order, consensus.family, consensus.genus, consensus.short) %>%
+        summarise(number.PolygonIDs.present = sum(present == TRUE), number.PolygonIDs.absent = sum(present == FALSE))
+
+    PolygonIDs.per.OTU
+
+# (note that aggregated results below are occurrences of the OTUs, not of the higher level taxa -- e.g. two amphibian OTUs
+# that were both observed in a Polygon_ID would count twice towards Amphibia, not once).
+
+# class
+PolygonIDs.per.OTU %>% group_by(dataset, consensus.class) %>%
+    summarise(number.PolygonID.observations = sum(number.PolygonIDs.present)) %>% arrange(dataset, desc(number.PolygonID.observations))
+
+# order
+PolygonIDs.per.OTU %>% group_by(dataset, consensus.class, consensus.order) %>%
+    summarise(number.PolygonID.observations = sum(number.PolygonIDs.present)) %>% arrange(dataset, desc(number.PolygonID.observations))
+
+# family
+PolygonIDs.per.OTU %>% group_by(dataset, consensus.class, consensus.order, consensus.family) %>%
+    summarise(number.PolygonID.observations = sum(number.PolygonIDs.present)) %>% arrange(dataset, desc(number.PolygonID.observations))
+
+# genus
+PolygonIDs.per.OTU %>% group_by(dataset, consensus.class, consensus.order, consensus.family, consensus.genus) %>%
+    summarise(number.PolygonID.observations = sum(number.PolygonIDs.present)) %>% arrange(dataset, desc(number.PolygonID.observations))
+
+# species
+PolygonIDs.per.OTU %>% group_by(dataset, consensus.class, consensus.order, consensus.family, consensus.genus, consensus.family, consensus.short) %>%
+    summarise(number.PolygonID.observations = sum(number.PolygonIDs.present)) %>% arrange(dataset, desc(number.PolygonID.observations))
+
+rm(PolygonIDs.per.OTU)
+
+```
+
+```{r how well do the two markers agree on OTU richness?}
+# Lab_ID-wise correlation of OTU richness
+    leech %>%
+        group_by(dataset, Lab_ID) %>% summarise(richness = sum(reads>0)) %>% spread(key = dataset, value = richness) %>% filter(complete.cases(.)) %>%
+        ggplot(aes(x=LSU, y=SSU)) + geom_jitter(height = 0.25, width = 0.25) +
+            geom_abline() + labs(x="LSU richness per LabID", y="SSU richness per LabID") + coord_equal()
+
+# Polygon_ID-wise correlation of OTU richness
+    leech %>%
+        group_by(dataset, Polygon_ID, OTU, reads) %>%
+        summarise(present = ifelse(sum(reads) > 0, 1, 0)) %>%
+        group_by(dataset, Polygon_ID) %>%
+        summarise(richness = sum(present)) %>%
+        spread(key = dataset, value = richness) %>% filter(complete.cases(.)) %>%
+        ggplot(aes(x=LSU, y=SSU)) + geom_point() +
+            geom_abline() + labs(x="LSU richness per PolygonID", y="SSU richness per PolygonID") + coord_equal()
+```
+
+```{r}
+
+```
+

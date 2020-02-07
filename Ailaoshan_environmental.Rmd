@@ -1,0 +1,91 @@
+---
+title: "Ailaoshan_environmental.Rmd"
+author: "Chris Baker"
+email: "bakerccm@gmail.com"
+date: "17/08/2018"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+library("tidyverse")
+library("gplots")
+library("ggrepel")
+library("readxl")
+library("viridis")
+```
+
+```{r clear old variables, include=FALSE}
+rm(list=ls())
+```
+
+```{r read in data, include=FALSE}
+    env.data <- read_excel("data/environmental_variables_20180801.xlsx", sheet = "variables", col_names = TRUE)
+```
+
+```{r rename polygon id to be consistent with other existing data}
+    env.data <- env.data %>%
+        dplyr::rename(Polygon_ID = polygon_ID) %>%
+        mutate(Polygon_ID = as.character(Polygon_ID))
+```
+
+```{r}
+ailaoplot <- env.data %>% ggplot(aes(x=longitude, y=latitude))
+
+ailaoplot + geom_point(aes(col = elevation_mean)) + scale_colour_distiller(type = "seq", palette=1)
+ailaoplot + geom_point(aes(col = elevation_median)) + scale_colour_distiller(type = "seq", palette=1)
+ailaoplot + geom_point(aes(col = elevation_std_dev)) + scale_colour_distiller(type = "seq", palette=1)
+
+#ailaoplot + geom_point(aes(col = tpi_mean)) + scale_color_viridis() 
+ailaoplot + geom_point(aes(col = tpi_mean)) + scale_colour_distiller(type = "div", palette=2)
+ailaoplot + geom_point(aes(col = tpi_median)) + scale_colour_distiller(type = "div", palette=2)
+ailaoplot + geom_point(aes(col = tpi_std_dev)) + scale_colour_distiller(type = "div", palette=2)
+
+ailaoplot + geom_point(aes(col = distance_to_road_mean)) + scale_colour_distiller(type = "seq", palette=1)
+ailaoplot + geom_point(aes(col = distance_to_road_median)) + scale_colour_distiller(type = "seq", palette=1)
+ailaoplot + geom_point(aes(col = distance_to_road_std_dev)) + scale_colour_distiller(type = "seq", palette=1)
+
+ailaoplot + geom_point(aes(col = distance_to_stream_mean)) + scale_colour_distiller(type = "seq", palette=1)
+ailaoplot + geom_point(aes(col = distance_to_stream_median)) + scale_colour_distiller(type = "seq", palette=1)
+ailaoplot + geom_point(aes(col = distance_to_stream_std_dev)) + scale_colour_distiller(type = "seq", palette=1)
+
+ailaoplot + geom_point(aes(col = distance_to_nature_reserve_boundary)) + scale_colour_distiller(type = "seq", palette=1)
+```
+
+```{r look at correlations among environmental variables}
+source("corvif.R")
+
+# mean and median are highly correlated ...
+temp <- env.data %>% select(-Polygon_ID, -shape_area_ha, -longitude)
+pdf(width=15, height=15)
+    temp %>% pairs(lower.panel = panel.smooth2, upper.panel = panel.cor, diag.panel = panel.hist)
+dev.off()
+
+# ... so remove mean and use median
+temp <- env.data %>% select(-Polygon_ID, -shape_area_ha, -longitude) %>%
+    select(-contains("mean"))
+pdf(width=15, height=15)
+    temp %>% pairs(lower.panel = panel.smooth2, upper.panel = panel.cor, diag.panel = panel.hist)
+dev.off()
+
+# also distance to road / stream are reasonably highly correlated with their respective
+# medians, and we would expect these to be correlated, so remove these std devs.
+# And tpi_std_dev and elevation_std_dev are also fairly highly correlated.
+# not sure quite how to interpret these ... as microenvironments? maybe remove one of these 
+# ... say tpi_std_dev?
+temp <- env.data %>% select(-Polygon_ID, -shape_area_ha, -longitude) %>%
+    select(-contains("mean")) %>%
+    select(-distance_to_stream_std_dev, -distance_to_road_std_dev, -tpi_std_dev)
+pdf(width=15, height=15)
+    temp %>% pairs(lower.panel = panel.smooth2, upper.panel = panel.cor, diag.panel = panel.hist)
+dev.off()
+
+# all the remaining variables are <3 so probably OK to keep them as (occupancy?) covariates
+temp %>% corvif()
+
+rm(temp)
+```
+
+
+```{r save data to file}
+save(list="env.data", file="Ailaoshan_environmental.Rdata")
+```

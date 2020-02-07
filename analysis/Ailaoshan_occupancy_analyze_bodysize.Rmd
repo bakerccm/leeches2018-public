@@ -1,0 +1,119 @@
+---
+title: "Ailaoshan_occupancy_analyze_bodysize.Rmd"
+author: "Chris Baker"
+email: "bakerccm@gmail.com"
+date: "09/12/2019"
+output: html_document
+---
+
+# this analysis is flawed because of potential selection bias: animals with sufficiently low
+# detection probability will be missing from our dataset, so analyzing the species we observe
+# doesn't necessarily tell you anything about the detectability of species in general
+
+```{r setup, include=FALSE}
+library("tidyverse")
+library("ggrepel")
+```
+
+```{r clear old variables, include=FALSE}
+rm(list=ls())
+```
+
+```{r read in MCMC output and GIS output for drawing maps, include=FALSE}
+# generated with Ailaoshan_OTU_table.Rmd
+    load(file="../Ailaoshan_OTU_table.Rdata")
+
+# MCMC output generated with Ailaoshan_occupancy_postprocess_cluster.Rmd
+    load(file="Ailaoshan_occupancy_postprocess_cluster.Rdata")
+```
+
+```{r join mammal model estimates to metadata}
+mammals <- OTU.estimates %>%
+    # attach data on body size and domestic/non-domestic
+        left_join(leech %>% select(OTU, AdultBodyMass_g, AdultBodyMass_g_source, domestic, consensus.class, consensus.short) %>% distinct(), by = "OTU") %>%
+    # mammals only
+        filter(consensus.class == "Mammals")
+```
+
+```{r regressions of occupancy and detection against body size}
+# occupancy
+# prob_lpsi0_mean is the (mean from the MCMC simulations of the) species-specific constant for occupancy, already scaled to probability
+
+    # LSU
+
+        lm.occupancy.LSU.allOTUs <- lm(prob_lpsi0_mean ~ log10(AdultBodyMass_g), data = mammals,
+                subset = (mammals$dataset == "LSU"))
+        summary(lm.occupancy.LSU.allOTUs) # t= 1.653, p=0.1105     
+
+        lm.occupancy.LSU.nonDomestic <- lm(prob_lpsi0_mean ~ log10(AdultBodyMass_g), data = mammals,
+                subset = (mammals$dataset == "LSU") & (mammals$domestic == "non-domestic"))
+        summary(lm.occupancy.LSU.nonDomestic) # t=0.189, p=0.852
+
+    # SSU
+
+        lm.occupancy.SSU.allOTUs <- lm(prob_lpsi0_mean ~ log10(AdultBodyMass_g), data = mammals,
+                subset = (mammals$dataset == "SSU"))
+        summary(lm.occupancy.SSU.allOTUs) # t= 2.031 , p=0.0522
+    
+        lm.occupancy.SSU.nonDomestic <- lm(prob_lpsi0_mean ~ log10(AdultBodyMass_g), data = mammals,
+                subset = (mammals$dataset == "SSU") & (mammals$domestic == "non-domestic"))
+        summary(lm.occupancy.SSU.nonDomestic) # t=0.266, p=0.7922
+
+# detection
+# prob_lp0_mean is the (mean from the MCMC simulations of the) species-specific constant for detection, already scaled to probability
+
+    # LSU
+
+        lm.detection.LSU.allOTUs <- lm(prob_lp0_mean ~ log10(AdultBodyMass_g), data = mammals,
+                subset = (mammals$dataset == "LSU"))
+        summary(lm.detection.LSU.allOTUs) # t= 2.586, p=0.0157
+
+        lm.detection.LSU.nonDomestic <- lm(prob_lp0_mean ~ log10(AdultBodyMass_g), data = mammals,
+                subset = (mammals$dataset == "LSU") & (mammals$domestic == "non-domestic"))
+        summary(lm.detection.LSU.nonDomestic) # t= 0.332, p=0.743    0.852   
+
+    # SSU
+
+        lm.detection.SSU.allOTUs <- lm(prob_lp0_mean ~ log10(AdultBodyMass_g), data = mammals,
+                subset = (mammals$dataset == "SSU"))
+        summary(lm.detection.SSU.allOTUs) # t= 2.846, p=0.00834
+    
+        lm.detection.SSU.nonDomestic <- lm(prob_lp0_mean ~ log10(AdultBodyMass_g), data = mammals,
+                subset = (mammals$dataset == "SSU") & (mammals$domestic == "non-domestic"))
+        summary(lm.detection.SSU.nonDomestic) # t=0.281, p=0.781
+```
+
+```{r draw plots}
+
+mammal.plot <- mammals %>% ggplot(aes(x = AdultBodyMass_g, colour = domestic, label = consensus.short)) +
+    facet_wrap(~ dataset) +
+    scale_x_continuous(trans='log10') +
+    labs(x = "adult body mass (g)", colour = "mammals")
+    
+# occupancy
+
+    mammal.plot + geom_point(aes(y = prob_lpsi0_mean)) + geom_text_repel(aes(y = prob_lpsi0_mean), size=2) + labs(y = "mean occupancy estimate")
+    # ggsave("figures/mammal_bodysize_vs_occupancy.pdf", width=8, height = 5, device=cairo_pdf)
+
+    mammal.plot + geom_point(aes(y = prob_lpsi0_mean)) + geom_text_repel(aes(y = prob_lpsi0_mean), size=2) + labs(y = "mean occupancy estimate") +
+        geom_smooth(data = mammals %>% filter(domestic == "non-domestic"), aes(y=prob_lpsi0_mean), method = "lm")
+        # use this to add an extra regression line for the dataset overall
+        # geom_smooth(data = mammals, aes(y=prob_lpsi0_mean, col=NA), method = "lm", se=FALSE, linetype = 3)
+    # ggsave("figures/mammal_bodysize_vs_occupancy_regressions.pdf", width=8, height = 5, device=cairo_pdf)
+
+# detection
+
+    mammal.plot + geom_point(aes(y = prob_lp0_mean)) + geom_text_repel(aes(y = prob_lp0_mean), size=2) + labs(y = "mean detection estimate")
+    # ggsave("figures/mammal_bodysize_vs_detection.pdf", width=8, height = 5, device=cairo_pdf)
+
+    mammal.plot + geom_point(aes(y = prob_lp0_mean)) + geom_text_repel(aes(y = prob_lp0_mean), size=2) + labs(y = "mean detection estimate") +
+        geom_smooth(data = mammals %>% filter(domestic == "non-domestic"), aes(y=prob_lp0_mean), method = "lm")
+    ggsave("figures/mammal_bodysize_vs_detection_regressions.pdf", width=8, height = 5, device=cairo_pdf)
+
+rm(mammal.plot)
+```
+
+```{r}
+
+```
+

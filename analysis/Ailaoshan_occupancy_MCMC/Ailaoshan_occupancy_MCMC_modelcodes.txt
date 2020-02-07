@@ -1,0 +1,33 @@
+# These models constrain the species-specific detection and occupancy estimates according to a
+# community-level multivariate normal distribution, with non-zero covariance between detection
+# and occupancy. See K&R p.669.
+
+# Note that we need to impute missing RHS covariates as part of the estimation.
+
+## model 01a : occupancy = (1) elev + (2) TPI + (3) road + (4) stream + (5) reserve
+##             detection = (1) numleeches
+## model 01b : occupancy = (1) elev + (2) TPI + (3) road + (4) stream + (5) reserve
+##             detection = (1) numleeches + (2) othertaxa
+## model 01c : occupancy = (1) elev + (2) TPI + (3) road + (4) stream + (5) reserve
+##             detection = (1) numleeches + (2) humanfraction
+
+## model 12a : occupancy = (1) elev + (3) road + (5) reserve
+##             detection = (1) numleeches
+## model 12b : occupancy = (1) elev + (3) road + (5) reserve
+##             detection = (1) numleeches + (2) othertaxa
+## model 12c : occupancy = (1) elev + (3) road + (5) reserve
+##             detection = (1) numleeches + (2) humanfraction
+
+## model 18a : occupancy = (3) road + (5) reserve
+##             detection = (1) numleeches
+## model 18b : occupancy = (3) road + (5) reserve
+##             detection = (1) numleeches + (2) othertaxa
+## model 18c : occupancy = (3) road + (5) reserve
+##             detection = (1) numleeches + (2) humanfraction
+
+## model 23a : occupancy = (1) elev + (5) reserve
+##             detection = (1) numleeches
+## model 23b : occupancy = (1) elev + (5) reserve
+##             detection = (1) numleeches + (2) othertaxa
+## model 23c : occupancy = (1) elev + (5) reserve
+##             detection = (1) numleeches + (2) humanfraction

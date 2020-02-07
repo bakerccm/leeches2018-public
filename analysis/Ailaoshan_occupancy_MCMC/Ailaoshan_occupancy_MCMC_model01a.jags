@@ -1,0 +1,112 @@
+model{
+    # priors for species specific occupancy (see K&R p.573 and K&R p.692)
+        for(k in 1:nspec){                      					# loop over species
+            ## model with hyperpriors
+            	betalpsi1[k] ~ dnorm(mu.betalpsi1, tau.betalpsi1)	# occupancy slope for elev
+            	betalpsi2[k] ~ dnorm(mu.betalpsi2, tau.betalpsi2)	# occupancy slope for tpi
+            	betalpsi3[k] ~ dnorm(mu.betalpsi3, tau.betalpsi3)	# occupancy slope for road
+            	betalpsi4[k] ~ dnorm(mu.betalpsi4, tau.betalpsi4)	# occupancy slope for stream
+            	betalpsi5[k] ~ dnorm(mu.betalpsi5, tau.betalpsi5)	# occupancy slope for reserve
+            	betalp1[k] ~ dnorm(mu.betalp1, tau.betalp1)			# detection slope for leech numbers
+            ## group lpsi and lp together in array eta
+               lpsi0[k] <- eta[k,1] # lpsi0[k] is species-specific intercept for occupancy (i.e. without occupancy covariates)
+               lp0[k] <- eta[k,2]   # lp0[k] is species-specific detection probability intercept (i.e. without detection covariates)
+               eta[k, 1:2] ~ dmnorm(mu.eta[], omega[,])
+        }
+    # hyperpriors
+        # priors for lpsi0 and lp0 (i.e. constants, equivalent to lpsi[k] and lp[k] in viorel's model)
+		# note mu.lpsi=mu.eta[1] and mu.lp=mu.eta[2]
+        # and probs = community means of occupancy and detection probability
+            for(v in 1:2){
+               mu.eta[v] <- log(probs[v] / (1-probs[v]))
+               probs[v] ~ dunif(0,1)
+            }
+        # prior for variance-covariance matrix on constants
+            omega[1:2, 1:2] ~ dwish(R[,], df)
+            sigma[1:2, 1:2] <- inverse(omega[,])
+        # occupancy model coefficients
+			mu.betalpsi1 ~ dnorm(0,0.1)
+			tau.betalpsi1 <- pow(sd.betalpsi1, -2)
+			sd.betalpsi1 ~ dunif(0, 1)
+			mu.betalpsi2 ~ dnorm(0,0.1)
+			tau.betalpsi2 <- pow(sd.betalpsi2, -2)
+			sd.betalpsi2 ~ dunif(0, 1)
+			mu.betalpsi3 ~ dnorm(0,0.1)
+			tau.betalpsi3 <- pow(sd.betalpsi3, -2)
+			sd.betalpsi3 ~ dunif(0, 1)
+			mu.betalpsi4 ~ dnorm(0,0.1)
+			tau.betalpsi4 <- pow(sd.betalpsi4, -2)
+			sd.betalpsi4 ~ dunif(0, 1)
+			mu.betalpsi5 ~ dnorm(0,0.1)
+			tau.betalpsi5 <- pow(sd.betalpsi5, -2)
+			sd.betalpsi5 ~ dunif(0, 1)
+        # detection model coefficients
+			mu.betalp1 ~ dnorm(0,0.1)
+			tau.betalp1 <- pow(sd.betalp1, -2)
+			sd.betalp1 ~ dunif(0,1)
+    # ecological model for latent occurrence zik (process model)
+		for (i in 1:nsite) {            # loop over sites
+			for(k in 1:nspec){              # loop over all species
+				z[i,k] ~ dbern(psi[i,k])
+				logit(psi[i,k]) <- lpsi0[k] + betalpsi1[k] * elev[i] + betalpsi2[k] * tpi[i] + betalpsi3[k] * road[i] + betalpsi4[k] * stream[i] + betalpsi5[k] * reserve[i]
+			}
+		}
+    # observation model for observed data y
+        for(k in 1:nspec){    # loop over species
+            for (j in 1:nrep) {    # loop over reps
+                for (i in 1:nsite) {    # loop over sites
+                    logit(p[i,j,k]) <- lp[i,j,k]
+                    lp[i,j,k] <- lp0[k] + betalp1[k] * numleeches[i,j]
+                    y[i,j,k] ~ dbern(z[i,k] * p[i,j,k])
+                }
+            }
+        }
+    # model for missing covariates (see K&R p.175)
+        # we could probably have a more sophisticated model here e.g. that imputes covariates from responses
+        for (i in 1:nsite) {  # loop over sites
+            elev[i] ~ dnorm(mu.elev, tau.elev)              # assume elev normally distributed
+            tpi[i] ~ dnorm(mu.tpi, tau.tpi)                 # assume tpi normally distributed
+            road[i] ~ dnorm(mu.road, tau.road)              # assume road normally distributed
+            stream[i] ~ dnorm(mu.stream, tau.stream)        # assume stream normally distributed
+            reserve[i] ~ dnorm(mu.reserve, tau.reserve)     # assume reserve normally distributed
+        }
+        for (i in 1:nsite) {  # loop over sites
+            for (j in 1:nrep) {  # loop over reps
+                # I think we have to do this to deal with NAs in numleeches, even though the NAs also have NAs in the response,
+                # i.e. they are replicates that were not conducted for each site
+                numleeches[i,j] ~ dnorm(mu.numleeches, tau.numleeches)
+            }
+        }
+        # elev priors
+            mu.elev ~ dnorm(0, 0.0001)
+            tau.elev <- pow(sd.elev, -2)
+            sd.elev ~ dunif(0, 100)
+        # tpi priors
+            mu.tpi ~ dnorm(0, 0.0001)
+            tau.tpi <- pow(sd.tpi, -2)
+            sd.tpi ~ dunif(0, 100)
+        # road priors
+            mu.road ~ dnorm(0, 0.0001)
+            tau.road <- pow(sd.road, -2)
+            sd.road ~ dunif(0, 100)
+        # stream priors
+            mu.stream ~ dnorm(0, 0.0001)
+            tau.stream <- pow(sd.stream, -2)
+            sd.stream ~ dunif(0, 100)
+        # reserve priors
+            mu.reserve ~ dnorm(0, 0.0001)
+            tau.reserve <- pow(sd.reserve, -2)
+            sd.reserve ~ dunif(0, 100)
+        # numleeches priors
+            mu.numleeches ~ dnorm(0, 0.0001)
+            tau.numleeches <- pow(sd.numleeches, -2)
+            sd.numleeches ~ dunif(0, 100)
+    # derived quantities
+        rho <- sigma[1,2] / sqrt(sigma[1,1] * sigma[2,2])  # correlation coefficient
+        for(k in 1:nspec){                  # loop over species
+            occ[k] <- sum(z[,k])/nsite      # proportion of sites occupied, for each species
+        }
+        for (i in 1:nsite) {                # loop over sites
+            Nsite[i] <- sum(z[i,])          # number of species occurring at each site
+        }
+}
